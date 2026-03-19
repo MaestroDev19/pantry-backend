@@ -20,11 +20,15 @@ from pantry_backend.utils.date_time_styling import (
 )
 from pantry_backend.utils.constants import (
     DEFAULT_PERSONAL_HOUSEHOLD_NAME,
+    EMBEDDING_QUEUE_MAIN,
+    EMBEDDINGS_TABLE_NAME,
     INVITE_CODE_LENGTH,
+    ITEMS_TABLE_NAME,
+    MAX_PAGE_SIZE,
     MAX_INVITE_CODE_RETRIES,
-    POSTGRES_UNIQUE_VIOLATION_CODE,
     PANTRY_HOUSEHOLD_CACHE_TTL_SECONDS,
     PANTRY_USER_CACHE_TTL_SECONDS,
+    POSTGRES_UNIQUE_VIOLATION_CODE,
 )
 from pantry_backend.utils.embedding import embeddings_client
 from pantry_backend.utils.formatters import to_public_dict, wrap_response
@@ -61,7 +65,11 @@ __all__ = [
     "TIME_24H_FORMAT",
 
     "DEFAULT_PERSONAL_HOUSEHOLD_NAME",
+    "ITEMS_TABLE_NAME",
+    "EMBEDDINGS_TABLE_NAME",
+    "EMBEDDING_QUEUE_MAIN",
     "INVITE_CODE_LENGTH",
+    "MAX_PAGE_SIZE",
     "MAX_INVITE_CODE_RETRIES",
     "POSTGRES_UNIQUE_VIOLATION_CODE",
     "PANTRY_HOUSEHOLD_CACHE_TTL_SECONDS",

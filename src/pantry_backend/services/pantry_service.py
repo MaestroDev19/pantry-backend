@@ -10,6 +10,7 @@ from supabase import Client
 import logging
 
 from pantry_backend.core.exceptions import AppError
+from pantry_backend.core.settings import get_settings
 from pantry_backend.ai.retriever_cache import get_retriever_cache
 from pantry_backend.vectorstores.supabase_vector_store import get_vector_store
 from pantry_backend.integrations.supabase_client import get_supabase_client
@@ -75,11 +76,10 @@ async def _enqueue_embedding_job(
     pantry_item_id: str,
     source_updated_at: str,
 ) -> bool:
-    settings_client = get_supabase_client  # reuse integration helper for now
+    client = get_supabase_client(get_settings())
+    if client is None:
+        return False
     try:
-        client = settings_client.__wrapped__(  # type: ignore[attr-defined]
-            get_supabase_client.__defaults__[0],  # pragma: no cover
-        )
         await anyio.to_thread.run_sync(
             lambda: (
                 client.schema("pgmq_public")
@@ -113,11 +113,10 @@ async def _enqueue_embedding_jobs_bulk(
 ) -> int:
     if not job_payloads:
         return 0
-    settings_client = get_supabase_client
+    client = get_supabase_client(get_settings())
+    if client is None:
+        return 0
     try:
-        client = settings_client.__wrapped__(  # type: ignore[attr-defined]
-            get_supabase_client.__defaults__[0],  # pragma: no cover
-        )
         await anyio.to_thread.run_sync(
             lambda: (
                 client.schema("pgmq_public")

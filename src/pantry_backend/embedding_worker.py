@@ -128,20 +128,6 @@ def _send_queue_message(
         },
     ).execute()
 
-
-def _fetch_pantry_item(*, pantry_item_id: str) -> Optional[Dict[str, Any]]:
-    client = _get_service_client()
-    response = (
-        client.table(ITEMS_TABLE)
-        .select("*")
-        .eq("id", pantry_item_id)
-        .limit(1)
-        .execute()
-    )
-    rows = list(getattr(response, "data", None) or [])
-    return rows[0] if rows else None
-
-
 def _embedding_content_for_row(row: Dict[str, Any]) -> str:
     name = row.get("name") or ""
     category = row.get("category") or ""
@@ -168,91 +154,118 @@ def _embedding_metadata_for_row(row: Dict[str, Any]) -> Dict[str, Optional[str]]
         "expiry_visible": row.get("expiry_visible"),
     }
 
-
-def _upsert_embedding(*, pantry_item_row: Dict[str, Any]) -> None:
-    client = _get_service_client()
-    content = _embedding_content_for_row(pantry_item_row)
-    metadata = _embedding_metadata_for_row(pantry_item_row)
-    vector = embeddings_client().embed_documents([content])[0]
-    now_iso = _to_iso(_now_utc())
-    client.table(EMBEDDINGS_TABLE).upsert(
-        {
-            "pantry_item_id": str(pantry_item_row["id"]),
-            "content": content,
-            "metadata": metadata,
-            "embedding": vector,
-            "created_at": now_iso,
-        },
-        on_conflict="pantry_item_id",
-    ).execute()
-
-
-def _process_queue_message(
+def _process_queue_messages_batch(
     *,
-    msg: _QueueMessage,
+    messages: List[_QueueMessage],
     source_queue_name: str,
     max_attempts: int,
-) -> None:
-    try:
-        item = _fetch_pantry_item(pantry_item_id=msg.pantry_item_id)
-        if item is None:
-            _send_queue_message(
-                queue_name=QUEUE_DEAD,
-                payload={
-                    "pantry_item_id": msg.pantry_item_id,
-                    "attempt_count": msg.attempt_count,
-                    "source_updated_at": msg.source_updated_at,
-                    "last_error": "pantry item not found",
-                },
-                sleep_seconds=0,
-            )
-            _delete_queue_message(queue_name=source_queue_name, msg_id=msg.msg_id)
-            return
+) -> int:
+    if not messages:
+        return 0
 
-        _upsert_embedding(pantry_item_row=item)
-        _delete_queue_message(queue_name=source_queue_name, msg_id=msg.msg_id)
-    except Exception as exc:  # pragma: no cover
-        next_attempt_count = msg.attempt_count + 1
-        error_text = str(exc)
+    client = _get_service_client()
+    pantry_item_ids = [msg.pantry_item_id for msg in messages]
 
-        if next_attempt_count >= max_attempts:
-            _send_queue_message(
-                queue_name=QUEUE_DEAD,
-                payload={
-                    "pantry_item_id": msg.pantry_item_id,
-                    "attempt_count": next_attempt_count,
-                    "source_updated_at": msg.source_updated_at,
-                    "last_error": error_text,
-                },
-                sleep_seconds=0,
-            )
-        else:
-            backoff_seconds = _compute_backoff_seconds(
-                attempt_count=next_attempt_count,
-            )
-            _send_queue_message(
-                queue_name=QUEUE_DLQ,
-                payload={
-                    "pantry_item_id": msg.pantry_item_id,
-                    "attempt_count": next_attempt_count,
-                    "source_updated_at": msg.source_updated_at,
-                    "last_error": error_text,
-                },
-                sleep_seconds=backoff_seconds,
-            )
+    response = (
+        client.table(ITEMS_TABLE)
+        .select("*")
+        .in_("id", pantry_item_ids)
+        .execute()
+    )
+    rows = list(getattr(response, "data", None) or [])
+    row_by_id = {
+        str(row.get("id")): row for row in rows if row.get("id") is not None
+    }
 
-        logger.warning(
-            "Embedding worker failed; scheduling retry/dead (pantry_item_id=%s attempt_count=%s error=%s)",
-            msg.pantry_item_id,
-            next_attempt_count,
-            error_text,
+    missing_msgs = [msg for msg in messages if msg.pantry_item_id not in row_by_id]
+    for msg in missing_msgs:
+        _send_queue_message(
+            queue_name=QUEUE_DEAD,
+            payload={
+                "pantry_item_id": msg.pantry_item_id,
+                "attempt_count": msg.attempt_count,
+                "source_updated_at": msg.source_updated_at,
+                "last_error": "pantry item not found",
+            },
+            sleep_seconds=0,
         )
         _delete_queue_message(queue_name=source_queue_name, msg_id=msg.msg_id)
 
+    found_msgs = [msg for msg in messages if msg.pantry_item_id in row_by_id]
+    if not found_msgs:
+        return len(messages)
+
+    found_rows = [row_by_id[msg.pantry_item_id] for msg in found_msgs]
+    contents = [_embedding_content_for_row(row) for row in found_rows]
+
+    try:
+        vectors = embeddings_client().embed_documents(contents)
+        if len(vectors) != len(found_msgs):
+            raise ValueError(
+                f"embedding count mismatch (expected={len(found_msgs)} actual={len(vectors)})"
+            )
+
+        metadata_list = [_embedding_metadata_for_row(row) for row in found_rows]
+        now_iso = _to_iso(_now_utc())
+        embedding_rows = [
+            {
+                "pantry_item_id": msg.pantry_item_id,
+                "content": content,
+                "metadata": metadata,
+                "embedding": vector,
+                "created_at": now_iso,
+            }
+            for msg, content, metadata, vector in zip(
+                found_msgs,
+                contents,
+                metadata_list,
+                vectors,
+            )
+        ]
+
+        client.table(EMBEDDINGS_TABLE).upsert(
+            embedding_rows,
+            on_conflict="pantry_item_id",
+        ).execute()
+
+        for msg in found_msgs:
+            _delete_queue_message(queue_name=source_queue_name, msg_id=msg.msg_id)
+
+        return len(messages)
+    except Exception as exc:  # pragma: no cover
+        error_text = str(exc)
+        logger.warning(
+            "Embedding worker batch failed; scheduling retry/dead (batch_size=%s error=%s)",
+            len(found_msgs),
+            error_text,
+        )
+
+        for msg in found_msgs:
+            next_attempt_count = msg.attempt_count + 1
+            if next_attempt_count >= max_attempts:
+                queue_name = QUEUE_DEAD
+                sleep_seconds = 0
+            else:
+                queue_name = QUEUE_DLQ
+                sleep_seconds = _compute_backoff_seconds(
+                    attempt_count=next_attempt_count,
+                )
+
+            _send_queue_message(
+                queue_name=queue_name,
+                payload={
+                    "pantry_item_id": msg.pantry_item_id,
+                    "attempt_count": next_attempt_count,
+                    "source_updated_at": msg.source_updated_at,
+                    "last_error": error_text,
+                },
+                sleep_seconds=sleep_seconds,
+            )
+            _delete_queue_message(queue_name=source_queue_name, msg_id=msg.msg_id)
+
+        return len(messages)
 
 def process_embedding_jobs_once(*, batch_size: int, max_attempts: int) -> int:
-    processed = 0
-
     dlq_messages = _read_queue_messages(queue_name=QUEUE_DLQ, batch_size=batch_size)
     remaining = max(0, batch_size - len(dlq_messages))
     main_messages = (
@@ -261,22 +274,16 @@ def process_embedding_jobs_once(*, batch_size: int, max_attempts: int) -> int:
         else []
     )
 
-    for msg in dlq_messages:
-        _process_queue_message(
-            msg=msg,
-            source_queue_name=QUEUE_DLQ,
-            max_attempts=max_attempts,
-        )
-        processed += 1
-
-    for msg in main_messages:
-        _process_queue_message(
-            msg=msg,
-            source_queue_name=QUEUE_MAIN,
-            max_attempts=max_attempts,
-        )
-        processed += 1
-
+    processed = _process_queue_messages_batch(
+        messages=dlq_messages,
+        source_queue_name=QUEUE_DLQ,
+        max_attempts=max_attempts,
+    )
+    processed += _process_queue_messages_batch(
+        messages=main_messages,
+        source_queue_name=QUEUE_MAIN,
+        max_attempts=max_attempts,
+    )
     return processed
 
 

@@ -1,0 +1,36 @@
+[project]
+name = "pantry-server"
+version = "0.1.0"
+description = "Pantry FastAPI backend with Supabase and AI workflows."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115.12",
+    "uvicorn[standard]>=0.34.0",
+    "pydantic-settings>=2.8.1",
+    "slowapi>=0.1.9",
+    "supabase>=2.15.0",
+    "langchain>=0.3.23",
+    "langchain-community>=0.3.21",
+    "langgraph>=0.3.20",
+    "langchain-google-genai>=2.1.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.5",
+    "httpx>=0.28.1",
+    "ruff>=0.11.2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

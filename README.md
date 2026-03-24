@@ -344,6 +344,30 @@ Background workers:
 | `ENABLE_BACKGROUND_WORKERS` | Enable embedding worker loop          | `True`  |
 | `EMBEDDING_BATCH_SIZE`      | Batch size for embeddings             | `50`    |
 | `EMBEDDING_WORKER_INTERVAL` | Worker check interval (seconds)       | `5`     |
+| `EMBEDDING_WORKER_MAX_ATTEMPTS` | Max attempts before dead-lettering | `3` |
+| `EMBEDDING_WORKER_MAX_SECONDS` | Time limit per worker invocation (seconds) | `20` |
+| `CACHE_MAX_ENTRIES`         | Max in-memory API cache entries       | `200`   |
+| `RETRIEVER_CACHE_MAX_ENTRIES` | Max in-memory retriever cache entries | `200` |
+
+Internal worker scheduler:
+
+- Endpoint: `POST /api/run-embedding-worker`
+- Header: `x-internal-secret: <EMBEDDING_WORKER_SECRET>`
+- Suggested cadence: every 15 minutes
+
+### Operational Runbook (Embedding Queue)
+
+- Queue depth alerts:
+  - Warn when main queue depth exceeds `100`
+  - Critical when combined main + dlq depth exceeds `500`
+- Dead-letter drain:
+  - Inspect `pantry_embedding_dead` messages
+  - Fix root cause (provider error, payload issues, missing pantry row)
+  - Requeue to `pantry_embedding_queue` using `pgmq_public.send_batch`
+- Scheduler health checks:
+  - Verify scheduler fires every 15 minutes
+  - Alert if no successful invocation in 30 minutes
+  - Alert on sustained `dead` count increase across 3 runs
 
 ### API Documentation
 

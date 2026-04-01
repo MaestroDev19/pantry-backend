@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     rate_limit_per_minute: int = Field(default=60, alias="RATE_LIMIT_PER_MINUTE")
     embedding_worker_secret: str | None = Field(default=None, alias="EMBEDDING_WORKER_SECRET")
 
+    pantry_read_cache_enabled: bool = Field(default=True, alias="PANTRY_READ_CACHE_ENABLED")
+    pantry_read_cache_ttl_seconds: int = Field(default=45, ge=0, alias="PANTRY_READ_CACHE_TTL_SECONDS")
+
 
 @lru_cache
 def get_settings() -> Settings:

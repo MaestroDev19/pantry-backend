@@ -21,6 +21,9 @@ class _FakeQuery:
     def eq(self, _: str, __: str) -> "_FakeQuery":
         return self
 
+    def in_(self, _: str, __: object) -> "_FakeQuery":
+        return self
+
     def limit(self, _: int) -> "_FakeQuery":
         return self
 
@@ -73,6 +76,7 @@ class _FakeSupabaseClient:
 def _item_row() -> dict[str, object]:
     return {
         "id": "17a336f0-eed2-4f5e-bf15-e4c4d89f9959",
+        "owner_id": "8b68f5fc-2660-4f80-a31e-58699bc2465d",
         "household_id": "f8c2ce57-d0ac-4d8d-96f8-6c4a1844091a",
         "name": "Milk",
         "category": "dairy",
@@ -438,6 +442,49 @@ def test_get_my_items_returns_list() -> None:
 
     assert len(result) == 1
     assert result[0].id == "17a336f0-eed2-4f5e-bf15-e4c4d89f9959"
+
+
+def test_get_household_pantry_resolves_owner_name_via_members_and_profiles() -> None:
+    hid = "f8c2ce57-d0ac-4d8d-96f8-6c4a1844091a"
+    oid = "8b68f5fc-2660-4f80-a31e-58699bc2465d"
+    client = _FakeSupabaseClient(
+        table_results={
+            ("pantry_items", "select"): [SimpleNamespace(data=[_item_row()])],
+            ("household_members", "select"): [SimpleNamespace(data=[{"user_id": oid}])],
+            ("profiles", "select"): [
+                SimpleNamespace(data=[{"id": oid, "full_name": "  Sam  "}])
+            ],
+        }
+    )
+    service = PantryService(client)
+
+    result = anyio.run(
+        lambda: service.get_household_pantry(household_id=UUID(hid)),
+    )
+
+    assert len(result) == 1
+    assert result[0].owner_id == oid
+    assert result[0].owner_name == "Sam"
+
+
+def test_get_household_pantry_omits_owner_name_when_not_a_household_member() -> None:
+    hid = "a1a1a1a1-a1a1-a1a1-a1a1-a1a1a1a1a1a1"
+    oid = "8b68f5fc-2660-4f80-a31e-58699bc2465d"
+    row = {**_item_row(), "household_id": hid, "owner_id": oid}
+    client = _FakeSupabaseClient(
+        table_results={
+            ("pantry_items", "select"): [SimpleNamespace(data=[row])],
+            ("household_members", "select"): [SimpleNamespace(data=[])],
+        }
+    )
+    service = PantryService(client)
+
+    result = anyio.run(
+        lambda: service.get_household_pantry(household_id=UUID(hid)),
+    )
+
+    assert len(result) == 1
+    assert result[0].owner_name is None
 
 
 def test_update_my_item_raises_not_found_when_no_rows_returned() -> None:

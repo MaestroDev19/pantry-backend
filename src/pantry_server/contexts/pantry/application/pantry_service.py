@@ -16,8 +16,15 @@ from supabase import Client
 
 from pantry_server.contexts.ai.infrastructure.providers.embeddings_client import embeddings_client
 from pantry_server.contexts.pantry.domain.entities import PantryItem
+from pantry_server.core.config import get_settings
 from pantry_server.core.constants import ITEMS_TABLE_NAME
 from pantry_server.core.exceptions import AppError
+from pantry_server.shared.pantry_read_cache import (
+    cache_key_household,
+    cache_key_my_items,
+    get_or_set_coroutine,
+    invalidate_keys,
+)
 
 PANTRY_EMBEDDING_JOBS_TABLE_NAME = "pantry_embedding_jobs"
 INLINE_EMBEDDING_TIMEOUT_SECONDS = 2.0
@@ -53,10 +60,17 @@ def _response_data(response: Any) -> list[dict[str, Any]]:
     return [row for row in data if isinstance(row, dict)]
 
 
-def _row_to_pantry_item(row: dict[str, Any]) -> PantryItem:
+def _row_to_pantry_item(
+    row: dict[str, Any],
+    *,
+    owner_name: str | None = None,
+) -> PantryItem:
+    raw_owner = row.get("owner_id")
     return PantryItem(
         id=str(row["id"]),
         household_id=str(row["household_id"]),
+        owner_id=str(raw_owner) if raw_owner is not None else None,
+        owner_name=owner_name,
         name=str(row["name"]),
         category=str(row["category"]),
         quantity=float(row["quantity"]),
@@ -147,6 +161,7 @@ class PantryService:
         except Exception:
             await self._enqueue_embedding_job(item_id=str(row["id"]))
 
+        await self._invalidate_pantry_list_cache(owner_id=owner_id, household_id=household_id)
         return _row_to_pantry_item(row)
 
     @staticmethod
@@ -248,6 +263,7 @@ class PantryService:
                 # Bulk insert succeeds even if queue insert is temporarily unavailable.
                 pass
 
+        await self._invalidate_pantry_list_cache(owner_id=owner_id, household_id=household_id)
         return [_row_to_pantry_item(row) for row in rows]
 
     async def process_embedding_jobs(
@@ -413,12 +429,22 @@ class PantryService:
             "failed": failed,
         }
 
-    async def get_my_items(self, *, owner_id: UUID) -> list[PantryItem]:
+    async def _invalidate_pantry_list_cache(self, *, owner_id: UUID, household_id: UUID) -> None:
+        if not get_settings().pantry_read_cache_enabled:
+            return
+        await invalidate_keys(
+            cache_key_my_items(str(owner_id)),
+            cache_key_household(str(household_id)),
+        )
+
+    async def _load_my_items(self, *, owner_id: UUID) -> list[PantryItem]:
         try:
             response = await anyio.to_thread.run_sync(
                 lambda: (
                     self.supabase.table(ITEMS_TABLE_NAME)
-                    .select("id, household_id, name, category, quantity, unit, expiry_date")
+                    .select(
+                        "id, owner_id, household_id, name, category, quantity, unit, expiry_date"
+                    )
                     .eq("owner_id", str(owner_id))
                     .execute()
                 ),
@@ -432,12 +458,68 @@ class PantryService:
         rows = _response_data(response)
         return [_row_to_pantry_item(row) for row in rows]
 
-    async def get_household_pantry(self, *, household_id: UUID) -> list[PantryItem]:
+    async def _owner_names_for_household(
+        self,
+        *,
+        household_id: UUID,
+        owner_ids: list[str],
+    ) -> dict[str, str | None]:
+        """Resolve display names: owners must be in household_members; name from profiles."""
+        if not owner_ids:
+            return {}
+        try:
+            hm_response = await anyio.to_thread.run_sync(
+                lambda: (
+                    self.supabase.table("household_members")
+                    .select("user_id")
+                    .eq("household_id", str(household_id))
+                    .in_("user_id", owner_ids)
+                    .execute()
+                ),
+            )
+        except Exception as exc:
+            raise AppError(
+                "Failed to fetch household members for pantry owners",
+                status_code=status.HTTP_502_BAD_GATEWAY,
+            ) from exc
+
+        member_rows = _response_data(hm_response)
+        member_ids = [str(r["user_id"]) for r in member_rows if r.get("user_id")]
+        if not member_ids:
+            return {}
+
+        try:
+            prof_response = await anyio.to_thread.run_sync(
+                lambda: (
+                    self.supabase.table("profiles")
+                    .select("id, full_name")
+                    .in_("id", member_ids)
+                    .execute()
+                ),
+            )
+        except Exception as exc:
+            raise AppError(
+                "Failed to fetch profiles for pantry owners",
+                status_code=status.HTTP_502_BAD_GATEWAY,
+            ) from exc
+
+        out: dict[str, str | None] = {}
+        for row in _response_data(prof_response):
+            uid = row.get("id")
+            if uid is None:
+                continue
+            fn = row.get("full_name")
+            out[str(uid)] = str(fn).strip() if isinstance(fn, str) and fn.strip() else None
+        return out
+
+    async def _load_household_pantry(self, *, household_id: UUID) -> list[PantryItem]:
         try:
             response = await anyio.to_thread.run_sync(
                 lambda: (
                     self.supabase.table(ITEMS_TABLE_NAME)
-                    .select("id, household_id, name, category, quantity, unit, expiry_date")
+                    .select(
+                        "id, owner_id, household_id, name, category, quantity, unit, expiry_date"
+                    )
                     .eq("household_id", str(household_id))
                     .execute()
                 ),
@@ -449,7 +531,44 @@ class PantryService:
             ) from exc
 
         rows = _response_data(response)
-        return [_row_to_pantry_item(row) for row in rows]
+        owner_ids = sorted(
+            {str(r["owner_id"]) for r in rows if r.get("owner_id") is not None}
+        )
+        names_by_owner = await self._owner_names_for_household(
+            household_id=household_id,
+            owner_ids=owner_ids,
+        )
+        return [
+            _row_to_pantry_item(
+                row,
+                owner_name=names_by_owner.get(str(row["owner_id"]))
+                if row.get("owner_id") is not None
+                else None,
+            )
+            for row in rows
+        ]
+
+    async def get_my_items(self, *, owner_id: UUID) -> list[PantryItem]:
+        settings = get_settings()
+        if not settings.pantry_read_cache_enabled or settings.pantry_read_cache_ttl_seconds <= 0:
+            return await self._load_my_items(owner_id=owner_id)
+        ttl = float(settings.pantry_read_cache_ttl_seconds)
+        return await get_or_set_coroutine(
+            cache_key_my_items(str(owner_id)),
+            ttl,
+            lambda: self._load_my_items(owner_id=owner_id),
+        )
+
+    async def get_household_pantry(self, *, household_id: UUID) -> list[PantryItem]:
+        settings = get_settings()
+        if not settings.pantry_read_cache_enabled or settings.pantry_read_cache_ttl_seconds <= 0:
+            return await self._load_household_pantry(household_id=household_id)
+        ttl = float(settings.pantry_read_cache_ttl_seconds)
+        return await get_or_set_coroutine(
+            cache_key_household(str(household_id)),
+            ttl,
+            lambda: self._load_household_pantry(household_id=household_id),
+        )
 
     async def update_my_item(
         self,
@@ -485,14 +604,19 @@ class PantryService:
                 "Pantry item not found",
                 status_code=status.HTTP_404_NOT_FOUND,
             )
-        return _row_to_pantry_item(rows[0])
+        item = _row_to_pantry_item(rows[0])
+        await self._invalidate_pantry_list_cache(
+            owner_id=owner_id,
+            household_id=UUID(item.household_id),
+        )
+        return item
 
     async def delete_my_item(self, *, item_id: UUID, owner_id: UUID) -> dict[str, str]:
         try:
             existing = await anyio.to_thread.run_sync(
                 lambda: (
                     self.supabase.table(ITEMS_TABLE_NAME)
-                    .select("id")
+                    .select("id, household_id")
                     .eq("id", str(item_id))
                     .eq("owner_id", str(owner_id))
                     .limit(1)
@@ -505,11 +629,16 @@ class PantryService:
                 status_code=status.HTTP_502_BAD_GATEWAY,
             ) from exc
 
-        if not _response_data(existing):
+        existing_rows = _response_data(existing)
+        if not existing_rows:
             raise AppError(
                 "Pantry item not found",
                 status_code=status.HTTP_404_NOT_FOUND,
             )
+        household_id_raw = existing_rows[0].get("household_id")
+        household_uuid = (
+            UUID(str(household_id_raw)) if household_id_raw is not None else None
+        )
 
         try:
             await anyio.to_thread.run_sync(
@@ -527,4 +656,9 @@ class PantryService:
                 status_code=status.HTTP_502_BAD_GATEWAY,
             ) from exc
 
+        if household_uuid is not None:
+            await self._invalidate_pantry_list_cache(
+                owner_id=owner_id,
+                household_id=household_uuid,
+            )
         return {"message": "Pantry item deleted"}

@@ -27,7 +27,7 @@ begin
   end if;
 
   perform net.http_post(
-    url := 'https://YOUR_API_HOST/api/pantry-items/internal/embedding-jobs/run?max_jobs=20',
+    url := 'https://pantry-backend-livid.vercel.app/api/pantry-items/internal/embedding-jobs/run?max_jobs=20',
     headers := jsonb_build_object(
       'content-type', 'application/json',
       'x-worker-secret', worker_secret

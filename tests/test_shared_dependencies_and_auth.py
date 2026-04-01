@@ -95,7 +95,7 @@ def test_get_supabase_client_uses_service_role_key_when_available(
     assert client == {"url": "https://example.supabase.co/", "key": "service-role"}
 
 
-def test_get_supabase_client_uses_publishable_key_when_service_role_missing(
+def test_get_supabase_client_returns_none_when_service_role_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -108,12 +108,10 @@ def test_get_supabase_client_uses_publishable_key_when_service_role_missing(
         supabase_publishable_key="publishable",
     )
 
-    client = get_supabase_client(settings)
-
-    assert client == {"url": "https://example.supabase.co/", "key": "publishable"}
+    assert get_supabase_client(settings) is None
 
 
-def test_get_supabase_client_uses_anon_key_when_only_anon_available(
+def test_get_supabase_client_returns_none_when_only_anon_configured(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -127,9 +125,7 @@ def test_get_supabase_client_uses_anon_key_when_only_anon_available(
         supabase_anon_key="anon",
     )
 
-    client = get_supabase_client(settings)
-
-    assert client == {"url": "https://example.supabase.co/", "key": "anon"}
+    assert get_supabase_client(settings) is None
 
 
 def test_get_supabase_client_dep_raises_when_unconfigured(monkeypatch: pytest.MonkeyPatch) -> None:

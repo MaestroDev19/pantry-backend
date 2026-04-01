@@ -16,12 +16,7 @@ async def get_auth_context(x_user_id: str | None = Header(default=None)) -> Auth
 
 
 def get_supabase_client(settings: Settings = Depends(get_settings)) -> Client | None:
-    if settings.supabase_url is None:
+    """Server-side client: service role only (not anon/publishable)."""
+    if settings.supabase_url is None or not settings.supabase_service_role_key:
         return None
-    if settings.supabase_service_role_key is not None:
-        return create_client(str(settings.supabase_url), settings.supabase_service_role_key)
-    if settings.supabase_publishable_key is not None:
-        return create_client(str(settings.supabase_url), settings.supabase_publishable_key)
-    if settings.supabase_anon_key is not None:
-        return create_client(str(settings.supabase_url), settings.supabase_anon_key)
-    return None
+    return create_client(str(settings.supabase_url), settings.supabase_service_role_key)

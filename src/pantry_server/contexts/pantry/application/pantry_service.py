@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import logging
 import random
 from datetime import datetime, timedelta, timezone
 from typing import Callable
@@ -9,6 +11,7 @@ from uuid import UUID
 import anyio
 from fastapi import status
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from postgrest.exceptions import APIError
 from supabase import Client
 
 from pantry_server.contexts.ai.infrastructure.providers.embeddings_client import embeddings_client
@@ -25,6 +28,22 @@ MAX_BULK_ITEMS_PER_REQUEST = 100
 MAX_EMBEDDING_JOB_BATCH_SIZE = 20
 JITTER_MIN_RATIO = 0.5
 JITTER_MAX_RATIO = 1.5
+
+_logger = logging.getLogger(__name__)
+
+
+def _log_postgrest_insert_failure(
+    *,
+    operation: str,
+    exc: APIError,
+    payload: dict[str, Any] | list[dict[str, Any]],
+) -> None:
+    _logger.error(
+        "%s rejected by PostgREST: %s | payload=%s",
+        operation,
+        json.dumps(exc.json(), default=str),
+        json.dumps(payload, default=str),
+    )
 
 
 def _response_data(response: Any) -> list[dict[str, Any]]:
@@ -75,7 +94,22 @@ class PantryService:
             response = await anyio.to_thread.run_sync(
                 lambda: self.supabase.table(ITEMS_TABLE_NAME).insert(payload).execute(),
             )
+        except APIError as exc:
+            _log_postgrest_insert_failure(
+                operation="pantry_items insert (single)",
+                exc=exc,
+                payload=payload,
+            )
+            raise AppError(
+                "Failed to add pantry item",
+                status_code=status.HTTP_502_BAD_GATEWAY,
+            ) from exc
         except Exception as exc:
+            _logger.exception(
+                "pantry_items insert (single) failed: %s | payload=%s",
+                exc,
+                json.dumps(payload, default=str),
+            )
             raise AppError(
                 "Failed to add pantry item",
                 status_code=status.HTTP_502_BAD_GATEWAY,
@@ -168,7 +202,22 @@ class PantryService:
             response = await anyio.to_thread.run_sync(
                 lambda: self.supabase.table(ITEMS_TABLE_NAME).insert(payload).execute(),
             )
+        except APIError as exc:
+            _log_postgrest_insert_failure(
+                operation="pantry_items insert (bulk)",
+                exc=exc,
+                payload=payload,
+            )
+            raise AppError(
+                "Failed to add pantry items",
+                status_code=status.HTTP_502_BAD_GATEWAY,
+            ) from exc
         except Exception as exc:
+            _logger.exception(
+                "pantry_items insert (bulk) failed: %s | payload=%s",
+                exc,
+                json.dumps(payload, default=str),
+            )
             raise AppError(
                 "Failed to add pantry items",
                 status_code=status.HTTP_502_BAD_GATEWAY,

@@ -2,10 +2,12 @@ from types import SimpleNamespace
 from uuid import UUID
 
 import anyio
+import hashlib
 import pytest
 
 from pantry_server.contexts.pantry.application.pantry_service import PantryService
 from pantry_server.core.exceptions import AppError
+from pantry_server.core.config import get_settings
 
 
 class _FakeQuery:
@@ -159,6 +161,19 @@ def test_add_single_item_sets_embedding_ready_when_inline_embedding_succeeds() -
     assert updated_item_payload["embedding_error"] is None
     assert "embedding_updated_at" in updated_item_payload
 
+    metadata = updated_item_payload["embedding_metadata"]
+    assert isinstance(metadata, dict)
+    settings = get_settings()
+    assert metadata["provider"] == "google_genai"
+    assert metadata["model"] == settings.gemini_embeddings_model
+    assert metadata["dimensions"] == settings.gemini_embeddings_output_dimensionality
+
+    expected_text = PantryService._build_embedding_text(_item_row())
+    expected_sha256 = hashlib.sha256(expected_text.encode("utf-8")).hexdigest()
+    assert metadata["input_sha256"] == expected_sha256
+    assert metadata["input_length"] == len(expected_text)
+    assert metadata["generated_at"] == updated_item_payload["embedding_updated_at"]
+
 
 def test_add_single_item_enqueues_job_when_inline_embedding_fails() -> None:
     class _CapturingQuery(_FakeQuery):
@@ -294,7 +309,34 @@ def test_add_bulk_items_rejects_payload_larger_than_100() -> None:
 
 
 def test_process_embedding_jobs_completes_successfully() -> None:
-    client = _FakeSupabaseClient(
+    class _CapturingQuery(_FakeQuery):
+        def __init__(self, client: "_CapturingSupabaseClient", table_name: str) -> None:
+            super().__init__(client, table_name)
+            self._capturing_client = client
+
+        def update(self, payload: dict[str, object]) -> "_CapturingQuery":
+            self._capturing_client.update_payloads.append((self._table_name, payload))
+            return super().update(payload)
+
+    class _CapturingSupabaseClient(_FakeSupabaseClient):
+        def __init__(
+            self,
+            table_results: dict[tuple[str, str], list[object]] | None = None,
+        ) -> None:
+            super().__init__(table_results=table_results)
+            self.update_payloads: list[tuple[str, dict[str, object]]] = []
+
+        def table(self, table_name: str) -> _CapturingQuery:
+            return _CapturingQuery(self, table_name)
+
+    item_row = {
+        "id": "17a336f0-eed2-4f5e-bf15-e4c4d89f9959",
+        "name": "Milk",
+        "category": "dairy",
+        "quantity": 1.0,
+    }
+
+    client = _CapturingSupabaseClient(
         table_results={
             (
                 "pantry_embedding_jobs",
@@ -316,19 +358,8 @@ def test_process_embedding_jobs_completes_successfully() -> None:
                 SimpleNamespace(data=[{"id": 10}]),
                 SimpleNamespace(data=[{"id": 10}]),
             ],
-            ("pantry_items", "select"): [
-                SimpleNamespace(
-                    data=[
-                        {
-                            "id": "17a336f0-eed2-4f5e-bf15-e4c4d89f9959",
-                            "name": "Milk",
-                            "category": "dairy",
-                            "quantity": 1.0,
-                        }
-                    ]
-                )
-            ],
-            ("pantry_items", "update"): [SimpleNamespace(data=[{"id": "17a336f0-eed2-4f5e-bf15-e4c4d89f9959"}])],
+            ("pantry_items", "select"): [SimpleNamespace(data=[item_row])],
+            ("pantry_items", "update"): [SimpleNamespace(data=[{"id": item_row["id"]}])],
         }
     )
     service = PantryService(client, embeddings_provider=lambda: SimpleNamespace(embed_query=lambda _: [0.2, 0.4]))
@@ -339,6 +370,23 @@ def test_process_embedding_jobs_completes_successfully() -> None:
     assert result["processed"] == 1
     assert result["retried"] == 0
     assert result["failed"] == 0
+
+    updated_item_payload = next(payload for table, payload in client.update_payloads if table == "pantry_items")
+    assert updated_item_payload["embedding_status"] == "ready"
+    assert updated_item_payload["embedding_error"] is None
+
+    metadata = updated_item_payload["embedding_metadata"]
+    assert isinstance(metadata, dict)
+    settings = get_settings()
+    assert metadata["provider"] == "google_genai"
+    assert metadata["model"] == settings.gemini_embeddings_model
+    assert metadata["dimensions"] == settings.gemini_embeddings_output_dimensionality
+
+    expected_text = PantryService._build_embedding_text(item_row)
+    expected_sha256 = hashlib.sha256(expected_text.encode("utf-8")).hexdigest()
+    assert metadata["input_sha256"] == expected_sha256
+    assert metadata["input_length"] == len(expected_text)
+    assert metadata["generated_at"] == updated_item_payload["embedding_updated_at"]
 
 
 def test_process_embedding_jobs_retries_then_fails_at_max_attempts() -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import random
 from datetime import datetime, timedelta, timezone
@@ -27,6 +28,7 @@ from pantry_server.shared.pantry_read_cache import (
 )
 
 PANTRY_EMBEDDING_JOBS_TABLE_NAME = "pantry_embedding_jobs"
+EMBEDDING_METADATA_PROVIDER = "google_genai"
 INLINE_EMBEDDING_TIMEOUT_SECONDS = 2.0
 EMBEDDING_JOB_MAX_ATTEMPTS = 5
 EMBEDDING_JOB_BATCH_SIZE = 20
@@ -142,6 +144,11 @@ class PantryService:
                 vector = await anyio.to_thread.run_sync(
                     lambda: self._embeddings_provider().embed_query(embedding_text),
                 )
+            embedding_updated_at = datetime.now(timezone.utc).isoformat()
+            embedding_metadata = self._build_embedding_metadata(
+                embedding_text=embedding_text,
+                generated_at_iso=embedding_updated_at,
+            )
             await anyio.to_thread.run_sync(
                 lambda: (
                     self.supabase.table(ITEMS_TABLE_NAME)
@@ -149,7 +156,8 @@ class PantryService:
                         {
                             "embedding": vector,
                             "embedding_status": "ready",
-                            "embedding_updated_at": datetime.now(timezone.utc).isoformat(),
+                            "embedding_updated_at": embedding_updated_at,
+                            "embedding_metadata": embedding_metadata,
                             "embedding_error": None,
                         }
                     )
@@ -169,6 +177,23 @@ class PantryService:
         category = str(row.get("category", "")).strip()
         quantity = str(row.get("quantity", "")).strip()
         return f"name: {name}\ncategory: {category}\nquantity: {quantity}"
+
+    @staticmethod
+    def _build_embedding_metadata(
+        *,
+        embedding_text: str,
+        generated_at_iso: str,
+    ) -> dict[str, object]:
+        settings = get_settings()
+        input_sha256 = hashlib.sha256(embedding_text.encode("utf-8")).hexdigest()
+        return {
+            "provider": EMBEDDING_METADATA_PROVIDER,
+            "model": settings.gemini_embeddings_model,
+            "dimensions": settings.gemini_embeddings_output_dimensionality,
+            "input_sha256": input_sha256,
+            "input_length": len(embedding_text),
+            "generated_at": generated_at_iso,
+        }
 
     async def _enqueue_embedding_job(self, *, item_id: str) -> None:
         try:
@@ -331,6 +356,11 @@ class PantryService:
                     vector = await anyio.to_thread.run_sync(
                         lambda: self._embeddings_provider().embed_query(embedding_text),
                     )
+                embedding_updated_at = datetime.now(timezone.utc).isoformat()
+                embedding_metadata = self._build_embedding_metadata(
+                    embedding_text=embedding_text,
+                    generated_at_iso=embedding_updated_at,
+                )
 
                 await anyio.to_thread.run_sync(
                     lambda: (
@@ -339,7 +369,8 @@ class PantryService:
                             {
                                 "embedding": vector,
                                 "embedding_status": "ready",
-                                "embedding_updated_at": datetime.now(timezone.utc).isoformat(),
+                                "embedding_updated_at": embedding_updated_at,
+                                "embedding_metadata": embedding_metadata,
                                 "embedding_error": None,
                             }
                         )

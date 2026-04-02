@@ -81,7 +81,6 @@ def _item_row() -> dict[str, object]:
         "name": "Milk",
         "category": "dairy",
         "quantity": 1.0,
-        "unit": "liter",
         "expiry_date": None,
     }
 
@@ -96,7 +95,7 @@ def test_add_single_item_returns_created_item() -> None:
         lambda: service.add_single_item(
             owner_id=UUID("8b68f5fc-2660-4f80-a31e-58699bc2465d"),
             household_id=UUID("f8c2ce57-d0ac-4d8d-96f8-6c4a1844091a"),
-            item_data={"name": "Milk", "category": "dairy", "quantity": 1, "unit": "liter"},
+            item_data={"name": "Milk", "category": "dairy", "quantity": 1},
         )
     )
 
@@ -143,7 +142,7 @@ def test_add_single_item_sets_embedding_ready_when_inline_embedding_succeeds() -
         lambda: service.add_single_item(
             owner_id=UUID("8b68f5fc-2660-4f80-a31e-58699bc2465d"),
             household_id=UUID("f8c2ce57-d0ac-4d8d-96f8-6c4a1844091a"),
-            item_data={"name": "Milk", "category": "dairy", "quantity": 1, "unit": "liter"},
+            item_data={"name": "Milk", "category": "dairy", "quantity": 1},
         )
     )
 
@@ -200,7 +199,7 @@ def test_add_single_item_enqueues_job_when_inline_embedding_fails() -> None:
         lambda: service.add_single_item(
             owner_id=UUID("8b68f5fc-2660-4f80-a31e-58699bc2465d"),
             household_id=UUID("f8c2ce57-d0ac-4d8d-96f8-6c4a1844091a"),
-            item_data={"name": "Milk", "category": "dairy", "quantity": 1, "unit": "liter"},
+            item_data={"name": "Milk", "category": "dairy", "quantity": 1},
         )
     )
 
@@ -254,8 +253,8 @@ def test_add_bulk_items_inserts_pending_and_enqueues_jobs() -> None:
             owner_id=UUID("8b68f5fc-2660-4f80-a31e-58699bc2465d"),
             household_id=UUID("f8c2ce57-d0ac-4d8d-96f8-6c4a1844091a"),
             items_data=[
-                {"name": "Milk", "category": "dairy", "quantity": 1, "unit": "liter"},
-                {"name": "Bread", "category": "bakery", "quantity": 1, "unit": "piece"},
+                {"name": "Milk", "category": "dairy", "quantity": 1},
+                {"name": "Bread", "category": "bakery", "quantity": 1},
             ],
         )
     )
@@ -285,7 +284,7 @@ def test_add_bulk_items_rejects_payload_larger_than_100() -> None:
                 owner_id=UUID("8b68f5fc-2660-4f80-a31e-58699bc2465d"),
                 household_id=UUID("f8c2ce57-d0ac-4d8d-96f8-6c4a1844091a"),
                 items_data=[
-                    {"name": f"item-{index}", "category": "misc", "quantity": 1, "unit": "pcs"}
+                    {"name": f"item-{index}", "category": "misc", "quantity": 1}
                     for index in range(101)
                 ],
             )
@@ -325,7 +324,6 @@ def test_process_embedding_jobs_completes_successfully() -> None:
                             "name": "Milk",
                             "category": "dairy",
                             "quantity": 1.0,
-                            "unit": "liter",
                         }
                     ]
                 )
@@ -374,7 +372,6 @@ def test_process_embedding_jobs_retries_then_fails_at_max_attempts() -> None:
                             "name": "Milk",
                             "category": "dairy",
                             "quantity": 1.0,
-                            "unit": "liter",
                         }
                     ]
                 )

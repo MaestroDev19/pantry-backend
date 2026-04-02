@@ -17,7 +17,6 @@ class PantryUseCases:
         name: str,
         category: str,
         quantity: float,
-        unit: str,
     ) -> PantryItem:
         item = PantryItem(
             id=str(uuid4()),
@@ -25,6 +24,5 @@ class PantryUseCases:
             name=name,
             category=category,
             quantity=quantity,
-            unit=unit,
         )
         return await self.repository.create_item(item)

@@ -2,11 +2,10 @@ from __future__ import annotations
 
 from typing import Final
 
-from pantry_server.contexts.pantry.domain.models import CategoryEnum, UnitEnum
+from pantry_server.contexts.pantry.domain.models import CategoryEnum
 
 
 CATEGORY_VALUES: Final[tuple[str, ...]] = tuple(category.value for category in CategoryEnum)
-UNIT_VALUES: Final[tuple[str, ...]] = tuple(unit.value for unit in UnitEnum)
 ITEMS_TABLE_NAME: Final[str] = "pantry_items"
 EMBEDDINGS_TABLE_NAME: Final[str] = "pantry_embeddings"
 

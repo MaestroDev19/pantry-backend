@@ -74,7 +74,6 @@ def _row_to_pantry_item(
         name=str(row["name"]),
         category=str(row["category"]),
         quantity=float(row["quantity"]),
-        unit=str(row["unit"]),
         expiry_date=row.get("expiry_date"),
     )
 
@@ -169,8 +168,7 @@ class PantryService:
         name = str(row.get("name", "")).strip()
         category = str(row.get("category", "")).strip()
         quantity = str(row.get("quantity", "")).strip()
-        unit = str(row.get("unit", "")).strip()
-        return f"name: {name}\ncategory: {category}\nquantity: {quantity}\nunit: {unit}"
+        return f"name: {name}\ncategory: {category}\nquantity: {quantity}"
 
     async def _enqueue_embedding_job(self, *, item_id: str) -> None:
         try:
@@ -318,7 +316,7 @@ class PantryService:
                 item_response = await anyio.to_thread.run_sync(
                     lambda: (
                         self.supabase.table(ITEMS_TABLE_NAME)
-                        .select("id, name, category, quantity, unit")
+                        .select("id, name, category, quantity")
                         .eq("id", pantry_item_id)
                         .limit(1)
                         .execute()
@@ -443,7 +441,7 @@ class PantryService:
                 lambda: (
                     self.supabase.table(ITEMS_TABLE_NAME)
                     .select(
-                        "id, owner_id, household_id, name, category, quantity, unit, expiry_date"
+                        "id, owner_id, household_id, name, category, quantity, expiry_date"
                     )
                     .eq("owner_id", str(owner_id))
                     .execute()
@@ -518,7 +516,7 @@ class PantryService:
                 lambda: (
                     self.supabase.table(ITEMS_TABLE_NAME)
                     .select(
-                        "id, owner_id, household_id, name, category, quantity, unit, expiry_date"
+                        "id, owner_id, household_id, name, category, quantity, expiry_date"
                     )
                     .eq("household_id", str(household_id))
                     .execute()

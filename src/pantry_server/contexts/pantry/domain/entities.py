@@ -11,5 +11,4 @@ class PantryItem(BaseModel):
     name: str
     category: str
     quantity: float
-    unit: str
     expiry_date: date | None = None

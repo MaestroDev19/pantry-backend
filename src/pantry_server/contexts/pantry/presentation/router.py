@@ -42,7 +42,7 @@ async def add_single_item(
     pantry_service: PantryService = Depends(get_pantry_service),
 ) -> dict[str, PantryItem]:
     """JSON body: name, category (enum: produce|dairy|meat|grains|canned|frozen|spices|other),
-    quantity (>0), unit (enum: piece|gram|kilogram|milliliter|liter|cup|tablespoon|teaspoon),
+    quantity (>0),
     optional expiry_date (ISO date). Server adds owner_id, household_id, embedding_status."""
     item = await pantry_service.add_single_item(
         owner_id=user_id,

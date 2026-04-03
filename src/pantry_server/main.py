@@ -2,7 +2,6 @@ import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from prometheus_client import make_asgi_app
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
@@ -37,7 +36,14 @@ if settings.rate_limit_enabled and settings.rate_limit_per_minute > 0:
 register_exception_handlers(app)
 app.include_router(api_router, prefix="/api")
 if settings.metrics_enabled:
-    app.mount("/metrics", make_asgi_app())
+    try:
+        from prometheus_client import make_asgi_app
+
+        app.mount("/metrics", make_asgi_app())
+    except ImportError:
+        logging.getLogger(__name__).warning(
+            "prometheus_client not installed; /metrics disabled"
+        )
 
 
 @app.get("/health")

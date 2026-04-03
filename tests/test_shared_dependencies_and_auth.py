@@ -1,9 +1,10 @@
 from types import SimpleNamespace
+from typing import Any
 from uuid import UUID
 
 import anyio
 import pytest
-from fastapi import HTTPException, status
+from fastapi import status
 from starlette.requests import Request
 
 from pantry_server.core.config import Settings
@@ -14,7 +15,14 @@ from pantry_server.shared.auth import (
     get_current_user,
     get_current_user_id,
 )
-from pantry_server.shared.dependencies import get_auth_context, get_supabase_client
+from pantry_server.shared.dependencies import get_supabase_client
+
+
+def _run_get_current_user(**kwargs: Any):
+    async def _run():
+        return await get_current_user(**kwargs)
+
+    return anyio.run(_run)
 
 
 class _FakeSupabaseTableQuery:
@@ -57,20 +65,42 @@ def _request() -> Request:
     return Request(scope)
 
 
-def test_get_auth_context_raises_when_header_missing() -> None:
-    with pytest.raises(HTTPException) as exc_info:
-        anyio.run(get_auth_context, None)
+def test_get_current_user_dev_header_returns_user_when_flag_set() -> None:
+    uid = "8b68f5fc-2660-4f80-a31e-58699bc2465d"
+    user = _run_get_current_user(
+        settings=Settings(auth_allow_x_user_id_header=True),
+        x_user_id=uid,
+        credentials=None,
+        supabase=None,
+    )
+
+    assert getattr(user, "id", None) == uid
+
+
+def test_get_current_user_dev_header_invalid_uuid_raises() -> None:
+    with pytest.raises(AppError) as exc_info:
+        _run_get_current_user(
+            settings=Settings(auth_allow_x_user_id_header=True),
+            x_user_id="not-a-uuid",
+            credentials=None,
+            supabase=None,
+        )
 
     assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
-    assert exc_info.value.detail == "Missing authentication header"
 
 
-def test_get_auth_context_returns_default_dev_context() -> None:
-    context = anyio.run(get_auth_context, "user-1")
+def test_get_current_user_ignores_dev_header_when_flag_false() -> None:
+    fake_supabase = _FakeSupabaseClient(user_obj=SimpleNamespace(id="8b68f5fc-2660-4f80-a31e-58699bc2465d"))
+    credentials = SimpleNamespace(credentials="token")
 
-    assert context.user_id == "user-1"
-    assert context.household_id == "dev-household"
-    assert context.roles == ["member"]
+    user = _run_get_current_user(
+        settings=Settings(auth_allow_x_user_id_header=False),
+        x_user_id="8b68f5fc-2660-4f80-a31e-58699bc2465d",
+        credentials=credentials,
+        supabase=fake_supabase,
+    )
+
+    assert getattr(user, "id", None) == "8b68f5fc-2660-4f80-a31e-58699bc2465d"
 
 
 def test_get_supabase_client_returns_none_when_url_missing() -> None:
@@ -141,7 +171,12 @@ def test_get_current_user_raises_when_credentials_missing() -> None:
     fake_supabase = _FakeSupabaseClient(user_obj=SimpleNamespace(id="u1"))
 
     with pytest.raises(AppError) as exc_info:
-        anyio.run(get_current_user, None, fake_supabase)
+        _run_get_current_user(
+            settings=Settings(auth_allow_x_user_id_header=False),
+            x_user_id=None,
+            credentials=None,
+            supabase=fake_supabase,
+        )
 
     assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
 
@@ -151,7 +186,12 @@ def test_get_current_user_returns_user_when_supabase_validates_token() -> None:
     fake_supabase = _FakeSupabaseClient(user_obj=fake_user)
     credentials = SimpleNamespace(credentials="token")
 
-    user = anyio.run(get_current_user, credentials, fake_supabase)
+    user = _run_get_current_user(
+        settings=Settings(auth_allow_x_user_id_header=False),
+        x_user_id=None,
+        credentials=credentials,
+        supabase=fake_supabase,
+    )
 
     assert user is fake_user
 
@@ -165,7 +205,12 @@ def test_get_current_user_raises_when_supabase_auth_lookup_fails() -> None:
     credentials = SimpleNamespace(credentials="token")
 
     with pytest.raises(AppError) as exc_info:
-        anyio.run(get_current_user, credentials, fake_supabase)
+        _run_get_current_user(
+            settings=Settings(auth_allow_x_user_id_header=False),
+            x_user_id=None,
+            credentials=credentials,
+            supabase=fake_supabase,
+        )
 
     assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
 
@@ -175,9 +220,26 @@ def test_get_current_user_raises_when_user_not_found() -> None:
     credentials = SimpleNamespace(credentials="token")
 
     with pytest.raises(AppError) as exc_info:
-        anyio.run(get_current_user, credentials, fake_supabase)
+        _run_get_current_user(
+            settings=Settings(auth_allow_x_user_id_header=False),
+            x_user_id=None,
+            credentials=credentials,
+            supabase=fake_supabase,
+        )
 
     assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+def test_get_current_user_raises_when_supabase_unconfigured_and_no_dev_header() -> None:
+    with pytest.raises(AppError) as exc_info:
+        _run_get_current_user(
+            settings=Settings(auth_allow_x_user_id_header=False),
+            x_user_id=None,
+            credentials=SimpleNamespace(credentials="token"),
+            supabase=None,
+        )
+
+    assert exc_info.value.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
 
 
 def test_get_current_user_id_sets_request_state_and_returns_uuid() -> None:

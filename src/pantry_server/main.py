@@ -2,6 +2,7 @@ import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from prometheus_client import make_asgi_app
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
@@ -11,13 +12,11 @@ from pantry_server.core.errors import register_exception_handlers
 from pantry_server.core.lifespan import lifespan
 from pantry_server.middleware.rate_limit import create_limiter, rate_limit_exceeded_handler
 from pantry_server.middleware.request_context import RequestContextMiddleware
+from pantry_server.observability.logging_setup import setup_logging
 
 settings = get_settings()
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s %(message)s",
-)
+setup_logging()
 
 app = FastAPI(
     title=settings.app_name,
@@ -37,6 +36,8 @@ if settings.rate_limit_enabled and settings.rate_limit_per_minute > 0:
     app.add_middleware(SlowAPIMiddleware)
 register_exception_handlers(app)
 app.include_router(api_router, prefix="/api")
+if settings.metrics_enabled:
+    app.mount("/metrics", make_asgi_app())
 
 
 @app.get("/health")

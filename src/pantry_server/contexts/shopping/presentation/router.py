@@ -1,9 +1,11 @@
+from uuid import UUID
+
 from fastapi import APIRouter, Depends
 
 from pantry_server.contexts.ai.infrastructure.gemini_workflow import GeminiAiWorkflow
 from pantry_server.contexts.shopping.presentation.models import GenerateShoppingListResponse
-from pantry_server.shared.contracts import AuthContext, ShoppingWorkflowInput
-from pantry_server.shared.dependencies import get_auth_context
+from pantry_server.shared.auth import get_current_user_id
+from pantry_server.shared.contracts import ShoppingWorkflowInput
 
 router = APIRouter()
 workflow = GeminiAiWorkflow()
@@ -32,7 +34,7 @@ async def list_shopping_lists() -> dict[str, list[object]]:
 @router.post("/generate-shopping-list")
 async def generate_shopping_list(
     payload: ShoppingWorkflowInput,
-    _: AuthContext = Depends(get_auth_context),
+    _user_id: UUID = Depends(get_current_user_id),
 ) -> GenerateShoppingListResponse:
     retrieved_context = retrieve_shopping_context(payload.recipe_goal)
     shopping_list = await workflow.generate_shopping_list(payload)

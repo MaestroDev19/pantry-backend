@@ -24,8 +24,16 @@ from pantry_server.core.constants import (
 )
 from pantry_server.core.datetime_formatting import format_iso_datetime
 from pantry_server.core.exceptions import AppError
+from pantry_server.observability.logging_events import log_household_event
+from pantry_server.observability.metrics import record_household_outcome
+from pantry_server.observability.redact import redact_for_log
 
 logger = logging.getLogger("pantry_server.household_service")
+
+
+def _emit_household(*, operation: str, outcome: str, reason: str) -> None:
+    record_household_outcome(operation=operation, outcome=outcome, reason=reason)
+    log_household_event(logger, operation=operation, outcome=outcome, reason=reason)
 
 
 def _iso_now() -> str:
@@ -80,6 +88,7 @@ class HouseholdService:
             ),
         )
         if _response_has_data(membership_response):
+            _emit_household(operation="create", outcome="failure", reason="already_member")
             raise AppError(
                 "User is already a member of a household",
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -97,7 +106,9 @@ class HouseholdService:
                 ),
             )
             if _response_has_data(existing_personal):
-                return _row_to_household_response(_first_row(existing_personal))
+                row = _row_to_household_response(_first_row(existing_personal))
+                _emit_household(operation="create", outcome="success", reason="ok")
+                return row
 
         payload: dict[str, object] = {
             "name": household.name,
@@ -127,15 +138,26 @@ class HouseholdService:
                     ),
                 )
                 if _response_has_data(existing):
-                    return _row_to_household_response(_first_row(existing))
+                    row = _row_to_household_response(_first_row(existing))
+                    _emit_household(operation="create", outcome="success", reason="ok")
+                    return row
 
-            logger.error("Failed to create household", extra={"user_id": str(user_id), "error": details})
+            logger.error(
+                "Failed to create household",
+                extra={
+                    "event": "household_error",
+                    "operation": "create",
+                    "error": redact_for_log(details),
+                },
+            )
+            _emit_household(operation="create", outcome="failure", reason="server_error")
             raise AppError(
                 "Failed to create household",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             ) from exc
 
         if not _response_has_data(household_response):
+            _emit_household(operation="create", outcome="failure", reason="server_error")
             raise AppError(
                 "Failed to create household",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -164,16 +186,20 @@ class HouseholdService:
                     await anyio.to_thread.run_sync(
                         lambda: client.table("households").delete().eq("id", household_id).execute(),
                     )
+                    _emit_household(operation="create", outcome="failure", reason="already_member")
                     raise AppError(
                         "User is already a member of a household",
                         status_code=status.HTTP_400_BAD_REQUEST,
                     ) from exc
+                _emit_household(operation="create", outcome="failure", reason="server_error")
                 raise AppError(
                     "Failed to create household",
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 ) from exc
 
-        return _row_to_household_response(_first_row(household_response))
+        row = _row_to_household_response(_first_row(household_response))
+        _emit_household(operation="create", outcome="success", reason="ok")
+        return row
 
     async def join_household_by_invite(
         self,
@@ -182,6 +208,7 @@ class HouseholdService:
     ) -> HouseholdJoinResponse:
         code = invite_code.upper().strip()
         if not code or len(code) != INVITE_CODE_LENGTH:
+            _emit_household(operation="join", outcome="failure", reason="invalid_invite")
             raise AppError(
                 "Invalid invite code",
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -198,6 +225,7 @@ class HouseholdService:
             details = exc.args[0] if exc.args else {}
             message = details.get("message") if isinstance(details, dict) else None
             if message == "household not found":
+                _emit_household(operation="join", outcome="failure", reason="not_found")
                 raise AppError(
                     "Household not found for this invite code",
                     status_code=status.HTTP_404_NOT_FOUND,
@@ -207,6 +235,7 @@ class HouseholdService:
                 "cannot join a personal household via invite code",
                 "user is not in any household",
             }:
+                _emit_household(operation="join", outcome="failure", reason="bad_request")
                 raise AppError(
                     message.replace(
                         "user is not in any household",
@@ -214,6 +243,7 @@ class HouseholdService:
                     ).capitalize(),
                     status_code=status.HTTP_400_BAD_REQUEST,
                 ) from exc
+            _emit_household(operation="join", outcome="failure", reason="server_error")
             raise AppError(
                 "Failed to join household",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -223,6 +253,7 @@ class HouseholdService:
         if isinstance(payload, list):
             payload = payload[0] if payload else None
         if not isinstance(payload, dict):
+            _emit_household(operation="join", outcome="failure", reason="server_error")
             raise AppError(
                 "Failed to join household",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -230,6 +261,7 @@ class HouseholdService:
 
         household_raw = payload.get("household")
         if not isinstance(household_raw, dict):
+            _emit_household(operation="join", outcome="failure", reason="server_error")
             raise AppError(
                 "Failed to join household",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -239,10 +271,12 @@ class HouseholdService:
         if not isinstance(items_moved, int):
             items_moved = 0
 
-        return HouseholdJoinResponse(
+        result = HouseholdJoinResponse(
             household=_row_to_household_response(household_raw),
             items_moved=items_moved,
         )
+        _emit_household(operation="join", outcome="success", reason="ok")
+        return result
 
     async def leave_household(self, user_id: UUID) -> HouseholdLeaveResponse:
         try:
@@ -256,6 +290,7 @@ class HouseholdService:
                 "user is not in any household",
                 "already in personal household",
             }:
+                _emit_household(operation="leave", outcome="failure", reason="bad_request")
                 raise AppError(
                     message.replace(
                         "user is not in any household",
@@ -263,6 +298,7 @@ class HouseholdService:
                     ).capitalize(),
                     status_code=status.HTTP_400_BAD_REQUEST,
                 ) from exc
+            _emit_household(operation="leave", outcome="failure", reason="server_error")
             raise AppError(
                 "Failed to leave household",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -272,6 +308,7 @@ class HouseholdService:
         if isinstance(payload, list):
             payload = payload[0] if payload else None
         if not isinstance(payload, dict):
+            _emit_household(operation="leave", outcome="failure", reason="server_error")
             raise AppError(
                 "Failed to leave household",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -284,6 +321,7 @@ class HouseholdService:
         try:
             new_household_id = UUID(new_household_id_raw) if new_household_id_raw else None
         except (TypeError, ValueError) as exc:
+            _emit_household(operation="leave", outcome="failure", reason="server_error")
             raise AppError(
                 "Failed to leave household",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -292,12 +330,14 @@ class HouseholdService:
         if not isinstance(items_moved, int):
             items_moved = 0
 
-        return HouseholdLeaveResponse(
+        result = HouseholdLeaveResponse(
             message="Left household and switched to personal household",
             items_deleted=items_moved,
             new_household_id=new_household_id,
             new_household_name=str(new_household_name) if new_household_name is not None else None,
         )
+        _emit_household(operation="leave", outcome="success", reason="ok")
+        return result
 
     async def convert_personal_to_joinable(
         self,
@@ -315,6 +355,7 @@ class HouseholdService:
             ),
         )
         if not _response_has_data(membership):
+            _emit_household(operation="convert", outcome="failure", reason="not_in_household")
             raise AppError(
                 "User is not in any household",
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -332,6 +373,7 @@ class HouseholdService:
             ),
         )
         if not _response_has_data(household):
+            _emit_household(operation="convert", outcome="failure", reason="not_found")
             raise AppError(
                 "Household not found",
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -339,11 +381,13 @@ class HouseholdService:
 
         row = _first_row(household)
         if not row.get("is_personal"):
+            _emit_household(operation="convert", outcome="failure", reason="already_joinable")
             raise AppError(
                 "Household is already joinable; only personal households can be converted",
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
         if str(row.get("owner_id")) != str(user_id):
+            _emit_household(operation="convert", outcome="failure", reason="forbidden")
             raise AppError(
                 "Only the household owner can convert it to joinable",
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -362,12 +406,15 @@ class HouseholdService:
             ),
         )
         if not _response_has_data(updated):
+            _emit_household(operation="convert", outcome="failure", reason="server_error")
             raise AppError(
                 "Failed to update household",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
-        return _row_to_household_response(_first_row(updated))
+        row = _row_to_household_response(_first_row(updated))
+        _emit_household(operation="convert", outcome="success", reason="ok")
+        return row
 
 
 __all__ = [

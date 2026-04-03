@@ -7,7 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", populate_by_name=True)
 
     app_name: str = "pantry-backend"
     app_version: str = "0.1.0"
@@ -39,10 +39,33 @@ class Settings(BaseSettings):
 
     rate_limit_enabled: bool = Field(default=True, alias="RATE_LIMIT_ENABLED")
     rate_limit_per_minute: int = Field(default=60, alias="RATE_LIMIT_PER_MINUTE")
+
+    households_join_rate_limit_enabled: bool = Field(
+        default=True,
+        alias="HOUSEHOLDS_JOIN_RATE_LIMIT_ENABLED",
+    )
+    households_join_rate_limit_ip_per_minute: int = Field(
+        default=30,
+        ge=0,
+        alias="HOUSEHOLDS_JOIN_RATE_LIMIT_IP_PER_MINUTE",
+    )
+    households_join_rate_limit_user_per_minute: int = Field(
+        default=10,
+        ge=0,
+        alias="HOUSEHOLDS_JOIN_RATE_LIMIT_USER_PER_MINUTE",
+    )
+    trust_x_forwarded_for: bool = Field(
+        default=False,
+        alias="TRUST_X_FORWARDED_FOR",
+    )
     embedding_worker_secret: str | None = Field(default=None, alias="EMBEDDING_WORKER_SECRET")
 
     pantry_read_cache_enabled: bool = Field(default=True, alias="PANTRY_READ_CACHE_ENABLED")
     pantry_read_cache_ttl_seconds: int = Field(default=45, ge=0, alias="PANTRY_READ_CACHE_TTL_SECONDS")
+
+    auth_allow_x_user_id_header: bool = Field(default=False, alias="AUTH_ALLOW_X_USER_ID")
+
+    metrics_enabled: bool = Field(default=True, alias="METRICS_ENABLED")
 
 
 @lru_cache

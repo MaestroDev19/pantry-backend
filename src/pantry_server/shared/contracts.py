@@ -1,12 +1,6 @@
 from pydantic import BaseModel, Field
 
 
-class AuthContext(BaseModel):
-    user_id: str
-    household_id: str | None = None
-    roles: list[str] = Field(default_factory=list)
-
-
 class EmbeddingRequest(BaseModel):
     text: str
 

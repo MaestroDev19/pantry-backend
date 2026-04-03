@@ -1,9 +1,11 @@
+from uuid import UUID
+
 from fastapi import APIRouter, Depends
 
 from pantry_server.contexts.ai.infrastructure.gemini_workflow import GeminiAiWorkflow
 from pantry_server.contexts.recipes.presentation.models import GenerateRecipeResponse
-from pantry_server.shared.contracts import AuthContext, RecipeWorkflowInput
-from pantry_server.shared.dependencies import get_auth_context
+from pantry_server.shared.auth import get_current_user_id
+from pantry_server.shared.contracts import RecipeWorkflowInput
 
 router = APIRouter()
 workflow = GeminiAiWorkflow()
@@ -32,7 +34,7 @@ async def list_recipes() -> dict[str, list[object]]:
 @router.post("/generate-recipe")
 async def generate_recipe(
     payload: RecipeWorkflowInput,
-    _: AuthContext = Depends(get_auth_context),
+    _user_id: UUID = Depends(get_current_user_id),
 ) -> GenerateRecipeResponse:
     retrieved_context = retrieve_recipe_context(payload.pantry_items)
     recipe = await workflow.generate_recipe(payload)

@@ -98,15 +98,38 @@ Configured via `src/pantry_server/core/config.py`.
 - `RATE_LIMIT_PER_MINUTE` (default: `60`)
 - `EMBEDDING_WORKER_SECRET` (required for `/api/pantry-items/internal/embedding-jobs/run`)
 
-Rate limiting is enforced with `slowapi` as an application-wide limit.
+Rate limiting is enforced with `slowapi` as an application-wide per-route budget (see [`src/pantry_server/middleware/rate_limit.py`](src/pantry_server/middleware/rate_limit.py)).
+
+#### Join endpoint (`POST /api/households/join`)
+
+Additional, stricter limits apply only to this route (in-process counters; see [ADR `docs/adr/0001-household-join-rate-limits.md`](docs/adr/0001-household-join-rate-limits.md)):
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `HOUSEHOLDS_JOIN_RATE_LIMIT_ENABLED` | `true` | Master switch for join-specific limits |
+| `HOUSEHOLDS_JOIN_RATE_LIMIT_IP_PER_MINUTE` | `30` | Per client IP (runs before authentication) |
+| `HOUSEHOLDS_JOIN_RATE_LIMIT_USER_PER_MINUTE` | `10` | Per authenticated user (after Bearer / dev header resolution) |
+| `TRUST_X_FORWARDED_FOR` | `false` | When `true`, client IP for the IP limit is the first address in `X-Forwarded-For` (use only behind a trusted reverse proxy) |
+
+Set either per-minute cap to `0` to disable that dimension only. Throttle events are logged on the `pantry_server.rate_limit` logger as `event=rate_limit_throttled` with `scope=household_join` and `dimension=ip` or `dimension=user`.
+
+Together with `RATE_LIMIT_*`, a single request can be limited by the global slowapi budget and by both join dimensions; the stricter effective limit applies first.
+
+**Edge alternatives (free / low-cost):** Cloudflare (Workers + KV, WAF/bot features depending on plan), AWS API Gateway usage plans, Kong OSS, or NGINX `limit_req` in front of the app. App-level limits remain useful for consistent JSON 429 responses and user-aware caps without tying you to one vendor.
 
 ## Authentication
 
 Routes using current-user context expect:
 
-- `Authorization: Bearer <supabase_access_token>`
+- `Authorization: Bearer <supabase_access_token>` (validated with `supabase.auth.get_user` using the service-role client).
 
 User and household are resolved via Supabase auth and `household_members`.
+
+**Local development only:** set `AUTH_ALLOW_X_USER_ID=true` to accept a valid UUID in the `X-User-ID` header as the authenticated user without a Bearer token. Do not enable this in production.
+
+**Rate limiting** (`RATE_LIMIT_ENABLED`): when present, `x-user-id` is used as part of the global rate-limit key; otherwise the client IP is used (see [`src/pantry_server/middleware/rate_limit.py`](src/pantry_server/middleware/rate_limit.py)). Join uses separate IP and user keys as described above.
+
+**Unauthenticated routes:** `GET /api/recipes/`, `GET /api/shopping-lists/`, and `POST /api/ai/*` (embeddings and mock recipe generation) do not require Bearer auth today.
 
 ## API Routes
 

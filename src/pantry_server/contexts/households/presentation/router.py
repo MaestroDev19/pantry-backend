@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends
@@ -18,6 +19,10 @@ from pantry_server.contexts.households.presentation.models import (
     HouseholdJoinRequest,
 )
 from pantry_server.core.exceptions import AppError
+from pantry_server.middleware.household_join_rate_limit import (
+    enforce_join_ip_limit,
+    enforce_join_user_limit,
+)
 from pantry_server.shared.auth import get_current_user_id
 from pantry_server.shared.dependencies import get_supabase_client
 
@@ -49,8 +54,10 @@ async def create_household(
 @router.post("/join", response_model=HouseholdJoinResponse)
 async def join_household(
     *,
+    _ip: Annotated[None, Depends(enforce_join_ip_limit)],
     body: HouseholdJoinRequest,
     user_id: UUID = Depends(get_current_user_id),
+    _user: Annotated[None, Depends(enforce_join_user_limit)],
     household_service: HouseholdService = Depends(get_household_service),
 ) -> HouseholdJoinResponse:
     return await household_service.join_household_by_invite(

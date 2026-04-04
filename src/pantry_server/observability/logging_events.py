@@ -34,6 +34,7 @@ def log_auth_failure(logger: logging.Logger, *, reason: str) -> None:
 def log_rate_limit_event(
     logger: logging.Logger,
     *,
+    scope: str = "household_join",
     dimension: str,
     request_id: str,
     path: str,
@@ -42,7 +43,7 @@ def log_rate_limit_event(
 ) -> None:
     extra: dict[str, str] = {
         "event": "rate_limit",
-        "scope": "household_join",
+        "scope": scope,
         "dimension": dimension,
         "request_id": request_id,
         "path": path,

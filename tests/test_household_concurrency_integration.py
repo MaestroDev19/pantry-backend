@@ -203,6 +203,8 @@ def _concurrency_settings(**kwargs: Any) -> Settings:
         "households_join_rate_limit_enabled": False,
         "households_join_rate_limit_ip_per_minute": 0,
         "households_join_rate_limit_user_per_minute": 0,
+        "household_mutations_rate_limit_enabled": False,
+        "ai_rate_limit_enabled": False,
         "auth_allow_x_user_id_header": True,
     }
     data.update(kwargs)

@@ -54,6 +54,21 @@ class Settings(BaseSettings):
         ge=0,
         alias="HOUSEHOLDS_JOIN_RATE_LIMIT_USER_PER_MINUTE",
     )
+    ai_rate_limit_enabled: bool = Field(default=True, alias="AI_RATE_LIMIT_ENABLED")
+    ai_rate_limit_ip_per_minute: int = Field(
+        default=20,
+        ge=0,
+        alias="AI_RATE_LIMIT_IP_PER_MINUTE",
+    )
+    household_mutations_rate_limit_enabled: bool = Field(
+        default=True,
+        alias="HOUSEHOLD_MUTATIONS_RATE_LIMIT_ENABLED",
+    )
+    household_mutations_user_per_minute: int = Field(
+        default=30,
+        ge=0,
+        alias="HOUSEHOLD_MUTATIONS_USER_PER_MINUTE",
+    )
     trust_x_forwarded_for: bool = Field(
         default=False,
         alias="TRUST_X_FORWARDED_FOR",

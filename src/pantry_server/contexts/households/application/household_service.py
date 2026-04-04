@@ -279,6 +279,45 @@ class HouseholdService:
         return result
 
     async def leave_household(self, user_id: UUID) -> HouseholdLeaveResponse:
+        membership = await anyio.to_thread.run_sync(
+            lambda: (
+                self.supabase.table("household_members")
+                .select("household_id")
+                .eq("user_id", str(user_id))
+                .limit(1)
+                .execute()
+            ),
+        )
+        if not _response_has_data(membership):
+            _emit_household(operation="leave", outcome="failure", reason="not_in_household")
+            raise AppError(
+                "User is not in any household",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        household_id = str(_first_row(membership)["household_id"])
+        household_lookup = await anyio.to_thread.run_sync(
+            lambda: (
+                self.supabase.table("households")
+                .select("is_personal")
+                .eq("id", household_id)
+                .limit(1)
+                .execute()
+            ),
+        )
+        if not _response_has_data(household_lookup):
+            _emit_household(operation="leave", outcome="failure", reason="household_not_found")
+            raise AppError(
+                "Household not found",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+        if bool(_first_row(household_lookup).get("is_personal")):
+            _emit_household(operation="leave", outcome="failure", reason="personal_household")
+            raise AppError(
+                "You cannot leave a personal household",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
         try:
             rpc_response = await anyio.to_thread.run_sync(
                 lambda: self.supabase.rpc("leave_household_rpc", {}).execute(),
@@ -289,13 +328,15 @@ class HouseholdService:
             if message in {
                 "user is not in any household",
                 "already in personal household",
+                "you cannot leave a personal household",
             }:
                 _emit_household(operation="leave", outcome="failure", reason="bad_request")
+                if message == "user is not in any household":
+                    detail = "User is not in any household"
+                else:
+                    detail = "You cannot leave a personal household"
                 raise AppError(
-                    message.replace(
-                        "user is not in any household",
-                        "User is not in any household",
-                    ).capitalize(),
+                    detail,
                     status_code=status.HTTP_400_BAD_REQUEST,
                 ) from exc
             _emit_household(operation="leave", outcome="failure", reason="server_error")
@@ -415,6 +456,81 @@ class HouseholdService:
         row = _row_to_household_response(_first_row(updated))
         _emit_household(operation="convert", outcome="success", reason="ok")
         return row
+
+    async def rename_household(
+        self,
+        user_id: UUID,
+        supabase_admin: Client,
+        name: str,
+    ) -> HouseholdResponse:
+        new_name = name.strip()
+        if not new_name:
+            _emit_household(operation="rename", outcome="failure", reason="bad_request")
+            raise AppError(
+                "Household name cannot be empty",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        membership = await anyio.to_thread.run_sync(
+            lambda: (
+                supabase_admin.table("household_members")
+                .select("household_id")
+                .eq("user_id", str(user_id))
+                .limit(1)
+                .execute()
+            ),
+        )
+        if not _response_has_data(membership):
+            _emit_household(operation="rename", outcome="failure", reason="not_in_household")
+            raise AppError(
+                "User is not in any household",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        household_id = UUID(_first_row(membership)["household_id"])
+
+        household = await anyio.to_thread.run_sync(
+            lambda: (
+                supabase_admin.table("households")
+                .select("id, name, invite_code, is_personal, created_at, owner_id")
+                .eq("id", str(household_id))
+                .limit(1)
+                .execute()
+            ),
+        )
+        if not _response_has_data(household):
+            _emit_household(operation="rename", outcome="failure", reason="not_found")
+            raise AppError(
+                "Household not found",
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+
+        row = _first_row(household)
+        if row.get("is_personal") and str(row.get("owner_id")) != str(user_id):
+            _emit_household(operation="rename", outcome="failure", reason="forbidden")
+            raise AppError(
+                "Only the household owner can rename a personal household",
+                status_code=status.HTTP_403_FORBIDDEN,
+            )
+
+        updated = await anyio.to_thread.run_sync(
+            lambda: (
+                supabase_admin.table("households")
+                .update({"name": new_name})
+                .eq("id", str(household_id))
+                .execute()
+            ),
+        )
+        if not _response_has_data(updated):
+            _emit_household(operation="rename", outcome="failure", reason="server_error")
+            raise AppError(
+                "Failed to update household",
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        result = _row_to_household_response(_first_row(updated))
+        _emit_household(operation="rename", outcome="success", reason="ok")
+        return result
 
 
 __all__ = [

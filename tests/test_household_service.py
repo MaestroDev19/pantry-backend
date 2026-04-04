@@ -1,3 +1,5 @@
+"""Unit tests use fakes; household succession is enforced in Postgres (see scripts/sql/test_household_succession.sql)."""
+
 from types import SimpleNamespace
 from uuid import UUID
 
@@ -238,6 +240,16 @@ def test_join_household_by_invite_maps_not_found_api_error() -> None:
 
 def test_leave_household_returns_mapped_response_on_success() -> None:
     client = _FakeSupabaseClient(
+        table_results={
+            ("household_members", "select"): [
+                SimpleNamespace(
+                    data=[{"household_id": "6ef281de-53a8-47a8-8e19-2f9d4ac4f39b"}],
+                ),
+            ],
+            ("households", "select"): [
+                SimpleNamespace(data=[{"is_personal": False}]),
+            ],
+        },
         rpc_results={
             "leave_household_rpc": [
                 SimpleNamespace(
@@ -248,7 +260,7 @@ def test_leave_household_returns_mapped_response_on_success() -> None:
                     }
                 )
             ],
-        }
+        },
     )
     service = HouseholdService(client)
     user_id = UUID("8b68f5fc-2660-4f80-a31e-58699bc2465d")
@@ -421,9 +433,11 @@ def test_join_household_by_invite_defaults_items_moved_when_not_int() -> None:
     assert result.items_moved == 0
 
 
-def test_leave_household_maps_known_bad_request_messages() -> None:
+def test_leave_household_rejects_when_user_has_no_membership() -> None:
     client = _FakeSupabaseClient(
-        rpc_results={"leave_household_rpc": [_api_error("already in personal household")]}
+        table_results={
+            ("household_members", "select"): [SimpleNamespace(data=[])],
+        },
     )
     service = HouseholdService(client)
 
@@ -431,10 +445,68 @@ def test_leave_household_maps_known_bad_request_messages() -> None:
         anyio.run(service.leave_household, UUID("8b68f5fc-2660-4f80-a31e-58699bc2465d"))
 
     assert exc_info.value.status_code == 400
+    assert "not in any household" in exc_info.value.message.lower()
+
+
+def test_leave_household_rejects_personal_household_before_rpc() -> None:
+    client = _FakeSupabaseClient(
+        table_results={
+            ("household_members", "select"): [
+                SimpleNamespace(
+                    data=[{"household_id": "6ef281de-53a8-47a8-8e19-2f9d4ac4f39b"}],
+                ),
+            ],
+            ("households", "select"): [
+                SimpleNamespace(data=[{"is_personal": True}]),
+            ],
+        },
+    )
+    service = HouseholdService(client)
+
+    with pytest.raises(AppError) as exc_info:
+        anyio.run(service.leave_household, UUID("8b68f5fc-2660-4f80-a31e-58699bc2465d"))
+
+    assert exc_info.value.status_code == 400
+    assert "personal household" in exc_info.value.message.lower()
+
+
+def test_leave_household_maps_rpc_personal_message() -> None:
+    client = _FakeSupabaseClient(
+        table_results={
+            ("household_members", "select"): [
+                SimpleNamespace(
+                    data=[{"household_id": "6ef281de-53a8-47a8-8e19-2f9d4ac4f39b"}],
+                ),
+            ],
+            ("households", "select"): [
+                SimpleNamespace(data=[{"is_personal": False}]),
+            ],
+        },
+        rpc_results={"leave_household_rpc": [_api_error("already in personal household")]},
+    )
+    service = HouseholdService(client)
+
+    with pytest.raises(AppError) as exc_info:
+        anyio.run(service.leave_household, UUID("8b68f5fc-2660-4f80-a31e-58699bc2465d"))
+
+    assert exc_info.value.status_code == 400
+    assert "personal household" in exc_info.value.message.lower()
 
 
 def test_leave_household_raises_when_payload_is_not_dict() -> None:
-    client = _FakeSupabaseClient(rpc_results={"leave_household_rpc": [SimpleNamespace(data=None)]})
+    client = _FakeSupabaseClient(
+        table_results={
+            ("household_members", "select"): [
+                SimpleNamespace(
+                    data=[{"household_id": "6ef281de-53a8-47a8-8e19-2f9d4ac4f39b"}],
+                ),
+            ],
+            ("households", "select"): [
+                SimpleNamespace(data=[{"is_personal": False}]),
+            ],
+        },
+        rpc_results={"leave_household_rpc": [SimpleNamespace(data=None)]},
+    )
     service = HouseholdService(client)
 
     with pytest.raises(AppError) as exc_info:
@@ -445,6 +517,16 @@ def test_leave_household_raises_when_payload_is_not_dict() -> None:
 
 def test_leave_household_raises_when_new_household_id_is_invalid() -> None:
     client = _FakeSupabaseClient(
+        table_results={
+            ("household_members", "select"): [
+                SimpleNamespace(
+                    data=[{"household_id": "6ef281de-53a8-47a8-8e19-2f9d4ac4f39b"}],
+                ),
+            ],
+            ("households", "select"): [
+                SimpleNamespace(data=[{"is_personal": False}]),
+            ],
+        },
         rpc_results={
             "leave_household_rpc": [
                 SimpleNamespace(
@@ -455,7 +537,7 @@ def test_leave_household_raises_when_new_household_id_is_invalid() -> None:
                     }
                 )
             ],
-        }
+        },
     )
     service = HouseholdService(client)
 
@@ -467,6 +549,16 @@ def test_leave_household_raises_when_new_household_id_is_invalid() -> None:
 
 def test_leave_household_defaults_items_deleted_when_not_int() -> None:
     client = _FakeSupabaseClient(
+        table_results={
+            ("household_members", "select"): [
+                SimpleNamespace(
+                    data=[{"household_id": "6ef281de-53a8-47a8-8e19-2f9d4ac4f39b"}],
+                ),
+            ],
+            ("households", "select"): [
+                SimpleNamespace(data=[{"is_personal": False}]),
+            ],
+        },
         rpc_results={
             "leave_household_rpc": [
                 SimpleNamespace(
@@ -477,7 +569,7 @@ def test_leave_household_defaults_items_deleted_when_not_int() -> None:
                     }
                 )
             ],
-        }
+        },
     )
     service = HouseholdService(client)
 
@@ -616,3 +708,156 @@ def test_convert_personal_to_joinable_success() -> None:
 
     assert result.is_personal is False
     assert result.name == "Team Household"
+
+
+def test_rename_household_rejects_blank_name() -> None:
+    client = _FakeSupabaseClient()
+    service = HouseholdService(client)
+
+    with pytest.raises(AppError) as exc_info:
+        anyio.run(
+            service.rename_household,
+            UUID("8b68f5fc-2660-4f80-a31e-58699bc2465d"),
+            client,
+            "   ",
+        )
+
+    assert exc_info.value.status_code == 400
+
+
+def test_rename_household_rejects_when_no_membership() -> None:
+    client = _FakeSupabaseClient(table_results={("household_members", "select"): [SimpleNamespace(data=[])]})
+    service = HouseholdService(client)
+
+    with pytest.raises(AppError) as exc_info:
+        anyio.run(
+            service.rename_household,
+            UUID("8b68f5fc-2660-4f80-a31e-58699bc2465d"),
+            client,
+            "New Name",
+        )
+
+    assert exc_info.value.status_code == 400
+
+
+def test_rename_household_rejects_when_household_missing() -> None:
+    member_row = {"household_id": "6ef281de-53a8-47a8-8e19-2f9d4ac4f39b"}
+    client = _FakeSupabaseClient(
+        table_results={
+            ("household_members", "select"): [SimpleNamespace(data=[member_row])],
+            ("households", "select"): [SimpleNamespace(data=[])],
+        }
+    )
+    service = HouseholdService(client)
+
+    with pytest.raises(AppError) as exc_info:
+        anyio.run(
+            service.rename_household,
+            UUID("8b68f5fc-2660-4f80-a31e-58699bc2465d"),
+            client,
+            "New Name",
+        )
+
+    assert exc_info.value.status_code == 404
+
+
+def test_rename_household_rejects_when_user_not_owner_of_personal() -> None:
+    member_row = {"household_id": "6ef281de-53a8-47a8-8e19-2f9d4ac4f39b"}
+    household_row = {
+        "id": "6ef281de-53a8-47a8-8e19-2f9d4ac4f39b",
+        "name": "My Household",
+        "invite_code": "ABC123",
+        "is_personal": True,
+        "created_at": "2026-01-01T10:00:00",
+        "owner_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+    }
+    client = _FakeSupabaseClient(
+        table_results={
+            ("household_members", "select"): [SimpleNamespace(data=[member_row])],
+            ("households", "select"): [SimpleNamespace(data=[household_row])],
+        }
+    )
+    service = HouseholdService(client)
+
+    with pytest.raises(AppError) as exc_info:
+        anyio.run(
+            service.rename_household,
+            UUID("8b68f5fc-2660-4f80-a31e-58699bc2465d"),
+            client,
+            "New Name",
+        )
+
+    assert exc_info.value.status_code == 403
+
+
+def test_rename_household_success_joinable_any_member() -> None:
+    member_row = {"household_id": "6ef281de-53a8-47a8-8e19-2f9d4ac4f39b"}
+    household_row = {
+        "id": "6ef281de-53a8-47a8-8e19-2f9d4ac4f39b",
+        "name": "Team",
+        "invite_code": "ABC123",
+        "is_personal": False,
+        "created_at": "2026-01-01T10:00:00",
+        "owner_id": None,
+    }
+    updated_row = {
+        "id": "6ef281de-53a8-47a8-8e19-2f9d4ac4f39b",
+        "name": "Renamed",
+        "invite_code": "ABC123",
+        "is_personal": False,
+        "created_at": "2026-01-01T10:00:00",
+    }
+    client = _FakeSupabaseClient(
+        table_results={
+            ("household_members", "select"): [SimpleNamespace(data=[member_row])],
+            ("households", "select"): [SimpleNamespace(data=[household_row])],
+            ("households", "update"): [SimpleNamespace(data=[updated_row])],
+        }
+    )
+    service = HouseholdService(client)
+
+    result = anyio.run(
+        service.rename_household,
+        UUID("8b68f5fc-2660-4f80-a31e-58699bc2465d"),
+        client,
+        " Renamed ",
+    )
+
+    assert result.name == "Renamed"
+
+
+def test_rename_household_success_personal_owner() -> None:
+    member_row = {"household_id": "6ef281de-53a8-47a8-8e19-2f9d4ac4f39b"}
+    uid = "8b68f5fc-2660-4f80-a31e-58699bc2465d"
+    household_row = {
+        "id": "6ef281de-53a8-47a8-8e19-2f9d4ac4f39b",
+        "name": "My Household",
+        "invite_code": "ABC123",
+        "is_personal": True,
+        "created_at": "2026-01-01T10:00:00",
+        "owner_id": uid,
+    }
+    updated_row = {
+        "id": "6ef281de-53a8-47a8-8e19-2f9d4ac4f39b",
+        "name": "Solo",
+        "invite_code": "ABC123",
+        "is_personal": True,
+        "created_at": "2026-01-01T10:00:00",
+    }
+    client = _FakeSupabaseClient(
+        table_results={
+            ("household_members", "select"): [SimpleNamespace(data=[member_row])],
+            ("households", "select"): [SimpleNamespace(data=[household_row])],
+            ("households", "update"): [SimpleNamespace(data=[updated_row])],
+        }
+    )
+    service = HouseholdService(client)
+
+    result = anyio.run(
+        service.rename_household,
+        UUID(uid),
+        client,
+        "Solo",
+    )
+
+    assert result.name == "Solo"

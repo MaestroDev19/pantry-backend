@@ -14,3 +14,7 @@ class HouseholdJoinRequest(BaseModel):
 
 class HouseholdConvertToJoinableRequest(BaseModel):
     name: str | None = None
+
+
+class HouseholdRenameRequest(BaseModel):
+    name: str

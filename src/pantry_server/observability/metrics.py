@@ -4,7 +4,7 @@ from prometheus_client import Counter
 
 household_operations_total = Counter(
     "household_operations_total",
-    "Household create/join/leave/convert outcomes",
+    "Household create/join/leave/convert/mutation-rate-limit outcomes",
     labelnames=("operation", "outcome", "reason"),
 )
 

@@ -17,11 +17,15 @@ from pantry_server.contexts.households.presentation.models import (
     HouseholdConvertToJoinableRequest,
     HouseholdCreateRequest,
     HouseholdJoinRequest,
+    HouseholdRenameRequest,
 )
 from pantry_server.core.exceptions import AppError
 from pantry_server.middleware.household_join_rate_limit import (
     enforce_join_ip_limit,
     enforce_join_user_limit,
+)
+from pantry_server.middleware.supplementary_rate_limits import (
+    enforce_household_mutation_user_limit,
 )
 from pantry_server.shared.auth import get_current_user_id
 from pantry_server.shared.dependencies import get_supabase_client
@@ -38,6 +42,7 @@ def get_household_service(supabase: Client | None = Depends(get_supabase_client)
 @router.post("/create", response_model=HouseholdResponse)
 async def create_household(
     *,
+    _mutation: Annotated[None, Depends(enforce_household_mutation_user_limit)],
     body: HouseholdCreateRequest,
     user_id: UUID = Depends(get_current_user_id),
     household_service: HouseholdService = Depends(get_household_service),
@@ -69,6 +74,7 @@ async def join_household(
 @router.post("/leave", response_model=HouseholdLeaveResponse)
 async def leave_household(
     *,
+    _mutation: Annotated[None, Depends(enforce_household_mutation_user_limit)],
     user_id: UUID = Depends(get_current_user_id),
     household_service: HouseholdService = Depends(get_household_service),
 ) -> HouseholdLeaveResponse:
@@ -78,6 +84,7 @@ async def leave_household(
 @router.post("/convert-to-joinable", response_model=HouseholdResponse)
 async def convert_to_joinable(
     *,
+    _mutation: Annotated[None, Depends(enforce_household_mutation_user_limit)],
     body: HouseholdConvertToJoinableRequest | None = Body(None),
     user_id: UUID = Depends(get_current_user_id),
     household_service: HouseholdService = Depends(get_household_service),
@@ -90,6 +97,24 @@ async def convert_to_joinable(
         user_id,
         supabase_admin,
         name=name,
+    )
+
+
+@router.post("/rename", response_model=HouseholdResponse)
+async def rename_household(
+    *,
+    _mutation: Annotated[None, Depends(enforce_household_mutation_user_limit)],
+    body: HouseholdRenameRequest,
+    user_id: UUID = Depends(get_current_user_id),
+    household_service: HouseholdService = Depends(get_household_service),
+    supabase_admin: Client | None = Depends(get_supabase_client),
+) -> HouseholdResponse:
+    if supabase_admin is None:
+        raise AppError("Supabase is not configured", status_code=503)
+    return await household_service.rename_household(
+        user_id,
+        supabase_admin,
+        body.name,
     )
 
 

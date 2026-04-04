@@ -18,44 +18,52 @@ from pantry_server.shared.auth import get_current_user_id
 
 LOGGER = logging.getLogger("pantry_server.rate_limit")
 
-_JOIN_PATH_SUFFIX = "/households/join"
+_AI_PATH_PREFIX = "/api/ai/"
+_HOUSEHOLD_MUTATION_SUFFIXES = frozenset(
+    {
+        "/households/create",
+        "/households/leave",
+        "/households/convert-to-joinable",
+        "/households/rename",
+    },
+)
 
-_ip_limiter = FixedWindowRateLimiter(window_seconds=WINDOW_SECONDS)
-_user_limiter = FixedWindowRateLimiter(window_seconds=WINDOW_SECONDS)
+_ai_ip_limiter = FixedWindowRateLimiter(window_seconds=WINDOW_SECONDS)
+_household_mutation_user_limiter = FixedWindowRateLimiter(window_seconds=WINDOW_SECONDS)
 
 
-def _clear_for_testing() -> None:
-    _ip_limiter.clear()
-    _user_limiter.clear()
+def clear_supplementary_rate_limiters_for_testing() -> None:
+    _ai_ip_limiter.clear()
+    _household_mutation_user_limiter.clear()
 
 
-def _join_path(request: Request) -> str:
-    return request.url.path
+def _household_mutation_path(request: Request) -> bool:
+    path = request.url.path
+    return request.method == "POST" and any(path.endswith(s) for s in _HOUSEHOLD_MUTATION_SUFFIXES)
 
 
-async def enforce_join_ip_limit(
+async def enforce_ai_ip_limit(
     request: Request,
     settings: Settings = Depends(get_settings),
 ) -> None:
-    if not settings.households_join_rate_limit_enabled:
+    if not settings.ai_rate_limit_enabled:
         return
-    limit = settings.households_join_rate_limit_ip_per_minute
+    limit = settings.ai_rate_limit_ip_per_minute
     if limit <= 0:
         return
-    if request.method != "POST" or not request.url.path.endswith(_JOIN_PATH_SUFFIX):
+    if request.method != "POST" or not request.url.path.startswith(_AI_PATH_PREFIX):
         return
     ip = client_ip_for_rate_limit(request, settings)
-    allowed = await _ip_limiter.allow(f"ip:{ip}", limit)
+    allowed = await _ai_ip_limiter.allow(f"ai:ip:{ip}", limit)
     if allowed:
         return
     request_id = getattr(request.state, "request_id", "unknown")
-    record_household_outcome(operation="join", outcome="failure", reason="rate_limited")
     log_rate_limit_event(
         LOGGER,
-        scope="household_join",
+        scope="ai",
         dimension="ip",
         request_id=request_id,
-        path=_join_path(request),
+        path=request.url.path,
         client_ip=ip,
     )
     raise AppError(
@@ -66,31 +74,31 @@ async def enforce_join_ip_limit(
     )
 
 
-async def enforce_join_user_limit(
+async def enforce_household_mutation_user_limit(
     request: Request,
     settings: Settings = Depends(get_settings),
     user_id: UUID = Depends(get_current_user_id),
 ) -> None:
-    if not settings.households_join_rate_limit_enabled:
+    if not settings.household_mutations_rate_limit_enabled:
         return
-    limit = settings.households_join_rate_limit_user_per_minute
+    limit = settings.household_mutations_user_per_minute
     if limit <= 0:
         return
-    if request.method != "POST" or not request.url.path.endswith(_JOIN_PATH_SUFFIX):
+    if not _household_mutation_path(request):
         return
-    key = f"user:{user_id}"
-    allowed = await _user_limiter.allow(key, limit)
+    key = f"household_mut:user:{user_id}"
+    allowed = await _household_mutation_user_limiter.allow(key, limit)
     if allowed:
         return
     request_id = getattr(request.state, "request_id", "unknown")
     ip = client_ip_for_rate_limit(request, settings)
-    record_household_outcome(operation="join", outcome="failure", reason="rate_limited")
+    record_household_outcome(operation="mutation", outcome="failure", reason="rate_limited")
     log_rate_limit_event(
         LOGGER,
-        scope="household_join",
+        scope="household_mutation",
         dimension="user",
         request_id=request_id,
-        path=_join_path(request),
+        path=request.url.path,
         client_ip=ip,
         user_id=str(user_id),
     )
@@ -103,6 +111,7 @@ async def enforce_join_user_limit(
 
 
 __all__ = [
-    "enforce_join_ip_limit",
-    "enforce_join_user_limit",
+    "clear_supplementary_rate_limiters_for_testing",
+    "enforce_ai_ip_limit",
+    "enforce_household_mutation_user_limit",
 ]

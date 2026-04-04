@@ -171,6 +171,7 @@ class ConcurrentFakeSupabase:
         if name != "join_household_by_invite_rpc":
             raise AssertionError(f"unexpected rpc {name}")
         code = str(params.get("invite_code", "")).upper().strip()
+        assert str(params.get("p_user_id")) == str(self.fixed_user_id)
         uid = self.fixed_user_id
         with self._lock:
             if uid in self._membership:

@@ -218,7 +218,7 @@ class HouseholdService:
             rpc_response = await anyio.to_thread.run_sync(
                 lambda: self.supabase.rpc(
                     "join_household_by_invite_rpc",
-                    {"invite_code": code},
+                    {"invite_code": code, "p_user_id": str(user_id)},
                 ).execute(),
             )
         except APIError as exc:

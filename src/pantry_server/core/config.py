@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     app_host: str = "0.0.0.0"
     app_port: int = 8000
 
-    cors_allow_origins: list[str] = ["*"]
+    cors_allow_origins: list[str] = ["http://localhost:3000","https://pantry-backend-livid.vercel.app"]
 
     supabase_url: AnyHttpUrl | None = None
     supabase_publishable_key: str | None = None

@@ -65,7 +65,7 @@ supabase/.temp/
 supabase/.branches/
 
 docs/
-
+.github/
 
 .agents/
 

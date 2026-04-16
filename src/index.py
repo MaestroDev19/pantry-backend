@@ -6,7 +6,7 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from pantry_server.main import app
+from pantry_server.main import app  # noqa: E402
 
 app
 

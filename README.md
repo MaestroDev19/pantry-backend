@@ -188,3 +188,15 @@ Run lint:
 ```bash
 uv run ruff check .
 ```
+
+## CI
+
+GitHub Actions runs the same backend validation on pushes and pull requests targeting `main`:
+
+```bash
+uv sync --frozen
+uv run ruff check .
+uv run pytest
+```
+
+For branch protection, require the `check` job from `.github/workflows/ci.yml` before merging to `main`.

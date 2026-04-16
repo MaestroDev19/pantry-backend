@@ -26,15 +26,15 @@ def test_mock_ai_workflow_generate_recipe_uses_request_items_or_defaults() -> No
         workflow.generate_recipe,
         RecipeWorkflowInput(pantry_items=["beans"], dietary_preferences=[]),
     )
-    fallback = anyio.run(
-        workflow.generate_recipe,
-        RecipeWorkflowInput(pantry_items=[], dietary_preferences=[]),
-    )
 
     assert from_request.ingredients == ["beans"]
-    assert fallback.ingredients == ["rice", "salt"]
     assert from_request.title == "Mock Pantry Bowl"
     assert len(from_request.instructions) == 3
+
+
+def test_recipe_workflow_input_rejects_empty_pantry_items() -> None:
+    with pytest.raises(ValueError):
+        RecipeWorkflowInput(pantry_items=[], dietary_preferences=[])
 
 
 def test_mock_ai_workflow_generate_shopping_list_returns_sorted_missing_items() -> None:

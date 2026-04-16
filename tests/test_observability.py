@@ -4,7 +4,6 @@ import io
 import json
 import logging
 
-import pytest
 from fastapi import Depends
 from fastapi.testclient import TestClient
 from prometheus_client import REGISTRY

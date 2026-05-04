@@ -18,13 +18,16 @@ class Settings(BaseSettings):
     app_host: str = "0.0.0.0"
     app_port: int = 8000
 
-    cors_allow_origins: list[str] = ["http://localhost:3000","https://pantry-web-theta.vercel.app"]
+    cors_allow_origins: list[str] = Field(
+        default=["http://localhost:3000", "https://pantry-web-theta.vercel.app"],
+        alias="CORS_ALLOW_ORIGINS",
+    )
 
-    supabase_url: AnyHttpUrl | None = None
-    supabase_publishable_key: str | None = None
-    supabase_anon_key: str | None = None
-    supabase_service_role_key: str | None = None
-    supabase_jwt_secret: str | None = None
+    supabase_url: AnyHttpUrl | None = Field(default=None, alias="SUPABASE_URL")
+    supabase_publishable_key: str | None = Field(default=None, alias="SUPABASE_PUBLISHABLE_KEY")
+    supabase_anon_key: str | None = Field(default=None, alias="SUPABASE_ANON_KEY")
+    supabase_service_role_key: str | None = Field(default=None, alias="SUPABASE_SERVICE_ROLE_KEY")
+    supabase_secret_key: str | None = Field(default=None, alias="SUPABASE_SECRET_KEY")
 
     google_genai_api_key: str | None = Field(
         default=None,

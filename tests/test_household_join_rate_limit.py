@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from pantry_server.contexts.households.domain.models import HouseholdJoinResponse, HouseholdResponse
-from pantry_server.contexts.households.presentation.router import get_household_service
+from pantry_server.shared.dependencies import get_household_service
 from pantry_server.core.config import Settings, get_settings
 from pantry_server.main import app
 from pantry_server.middleware.household_join_rate_limit import _clear_for_testing

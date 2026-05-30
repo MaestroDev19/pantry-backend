@@ -11,6 +11,7 @@ Output ONLY raw JSON (no markdown, no backticks) with this exact schema:
 {"title": string, "ingredients": string[], "instructions": string[]}
 
 Rules (follow all):
+- When retrieved_context is provided, prefer facts from it for pairings and technique.
 - Obey dietary_preferences.
 - Use ingredients from pantry_items when possible; do not invent specialty ingredients not in pantry_items.
 - Keep text compact: each ingredient/instruction string should be short.

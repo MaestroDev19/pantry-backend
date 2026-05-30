@@ -2,8 +2,10 @@ from pantry_server.contexts.ai.application.ports import AiWorkflowPort
 from pantry_server.shared.contracts import (
     EmbeddingRequest,
     EmbeddingResult,
+    RecipeGenerationResult,
     RecipeWorkflowInput,
     RecipeWorkflowOutput,
+    ShoppingGenerationResult,
     ShoppingWorkflowInput,
     ShoppingWorkflowOutput,
 )
@@ -15,9 +17,9 @@ class MockAiWorkflow(AiWorkflowPort):
         base = float(len(request.text))
         return EmbeddingResult(vector=[base, base / 2, base / 4])
 
-    async def generate_recipe(self, request: RecipeWorkflowInput) -> RecipeWorkflowOutput:
+    async def generate_recipe(self, request: RecipeWorkflowInput) -> RecipeGenerationResult:
         ingredients = request.pantry_items or ["rice", "salt"]
-        return RecipeWorkflowOutput(
+        recipe = RecipeWorkflowOutput(
             title="Mock Pantry Bowl",
             ingredients=ingredients,
             instructions=[
@@ -26,12 +28,14 @@ class MockAiWorkflow(AiWorkflowPort):
                 "Serve warm.",
             ],
         )
+        return RecipeGenerationResult(recipe=recipe, retrieved_context=[])
 
     async def generate_shopping_list(
         self,
         request: ShoppingWorkflowInput,
-    ) -> ShoppingWorkflowOutput:
+    ) -> ShoppingGenerationResult:
         desired = {"pasta", "tomato", "garlic", "olive oil", "salt"}
         available = {item.lower() for item in request.pantry_items}
         missing = sorted(item for item in desired if item not in available)
-        return ShoppingWorkflowOutput(items=missing)
+        shopping_list = ShoppingWorkflowOutput(items=missing)
+        return ShoppingGenerationResult(shopping_list=shopping_list, retrieved_context=[])

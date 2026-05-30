@@ -39,6 +39,11 @@ class RecipeWorkflowOutput(BaseModel):
     instructions: list[str]
 
 
+class RecipeGenerationResult(BaseModel):
+    recipe: RecipeWorkflowOutput
+    retrieved_context: list[str] = Field(default_factory=list)
+
+
 class ShoppingWorkflowInput(BaseModel):
     pantry_items: list[str] = Field(min_length=1, max_length=MAX_LIST_ITEMS)
     recipe_goal: str = Field(min_length=1, max_length=MAX_TEXT_LENGTH)
@@ -62,3 +67,8 @@ class ShoppingWorkflowInput(BaseModel):
 
 class ShoppingWorkflowOutput(BaseModel):
     items: list[str]
+
+
+class ShoppingGenerationResult(BaseModel):
+    shopping_list: ShoppingWorkflowOutput
+    retrieved_context: list[str] = Field(default_factory=list)

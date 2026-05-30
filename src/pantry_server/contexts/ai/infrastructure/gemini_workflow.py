@@ -2,13 +2,21 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from collections.abc import Awaitable, Callable, Sequence
+from typing import Any, TypeVar
 
 import anyio
 
 from pantry_server.contexts.ai.application.ports import AiWorkflowPort
 from pantry_server.contexts.ai.application.prompts import recipes as recipe_prompts
 from pantry_server.contexts.ai.application.prompts import shopping_lists as shopping_prompts
+from pantry_server.contexts.ai.infrastructure.context_retrieval import (
+    RECIPE_KNOWLEDGE_BASE,
+    SHOPPING_KNOWLEDGE_BASE,
+    build_recipe_query,
+    build_shopping_query,
+    retrieve_context,
+)
 from pantry_server.contexts.ai.infrastructure.mock_workflow import MockAiWorkflow
 from pantry_server.contexts.ai.infrastructure.providers.gemini import (
     get_gemini_chat,
@@ -18,14 +26,20 @@ from pantry_server.core.config import get_settings
 from pantry_server.shared.contracts import (
     EmbeddingRequest,
     EmbeddingResult,
+    RecipeGenerationResult,
     RecipeWorkflowInput,
     RecipeWorkflowOutput,
+    ShoppingGenerationResult,
     ShoppingWorkflowInput,
     ShoppingWorkflowOutput,
 )
 
 LOGGER = logging.getLogger("pantry_server.ai.gemini")
 GEMINI_CALL_TIMEOUT_SECONDS = 4.0
+
+TRequest = TypeVar("TRequest")
+TOutput = TypeVar("TOutput")
+TFallbackResult = TypeVar("TFallbackResult")
 
 
 class GeminiAiWorkflow(AiWorkflowPort):
@@ -48,66 +62,123 @@ class GeminiAiWorkflow(AiWorkflowPort):
             LOGGER.exception("Gemini embeddings failed; using fallback.")
             return await self._fallback.create_embedding(request)
 
-    async def generate_recipe(self, request: RecipeWorkflowInput) -> RecipeWorkflowOutput:
-        if self._chat is None:
-            return await self._fallback.generate_recipe(request)
-        try:
-            user_prompt = self._build_recipe_prompt(request)
-            with anyio.fail_after(GEMINI_CALL_TIMEOUT_SECONDS):
-                response = await anyio.to_thread.run_sync(
-                    lambda: self._chat.invoke(
-                        [
-                            ("system", recipe_prompts.SYSTEM_PROMPT),
-                            ("human", user_prompt),
-                        ]
-                    )
-                )
-            parsed = self._parse_json_payload(getattr(response, "content", ""))
-            recipe = self._normalize_recipe(parsed)
-            if recipe is None:
-                return await self._fallback.generate_recipe(request)
-            return recipe
-        except Exception:
-            LOGGER.exception("Gemini recipe generation failed; using fallback.")
-            return await self._fallback.generate_recipe(request)
+    async def generate_recipe(self, request: RecipeWorkflowInput) -> RecipeGenerationResult:
+        return await self._generate_with_gemini(
+            request=request,
+            query=build_recipe_query(request),
+            fallback_knowledge=RECIPE_KNOWLEDGE_BASE,
+            system_prompt=recipe_prompts.SYSTEM_PROMPT,
+            build_user_prompt=lambda ctx: self._build_recipe_prompt(request, ctx),
+            normalize=self._normalize_recipe,
+            fallback=self._fallback.generate_recipe,
+            to_result=lambda recipe, ctx: RecipeGenerationResult(
+                recipe=recipe,
+                retrieved_context=ctx,
+            ),
+            pick_from_fallback=lambda result: result.recipe,
+            merge_context=lambda fallback, ctx: ctx or fallback.retrieved_context,
+        )
 
     async def generate_shopping_list(
         self,
         request: ShoppingWorkflowInput,
-    ) -> ShoppingWorkflowOutput:
+    ) -> ShoppingGenerationResult:
+        return await self._generate_with_gemini(
+            request=request,
+            query=build_shopping_query(request),
+            fallback_knowledge=SHOPPING_KNOWLEDGE_BASE,
+            system_prompt=shopping_prompts.SYSTEM_PROMPT,
+            build_user_prompt=lambda ctx: self._build_shopping_prompt(request, ctx),
+            normalize=self._normalize_shopping_list,
+            fallback=self._fallback.generate_shopping_list,
+            to_result=lambda shopping_list, ctx: ShoppingGenerationResult(
+                shopping_list=shopping_list,
+                retrieved_context=ctx,
+            ),
+            pick_from_fallback=lambda result: result.shopping_list,
+            merge_context=lambda fallback, ctx: ctx or fallback.retrieved_context,
+        )
+
+    async def _generate_with_gemini(
+        self,
+        *,
+        request: TRequest,
+        query: str,
+        fallback_knowledge: list[str],
+        system_prompt: str,
+        build_user_prompt: Callable[[list[str]], str],
+        normalize: Callable[[Any], TOutput | None],
+        fallback: Callable[[TRequest], Awaitable[TFallbackResult]],
+        to_result: Callable[[TOutput, list[str]], Any],
+        pick_from_fallback: Callable[[TFallbackResult], TOutput],
+        merge_context: Callable[[TFallbackResult, list[str]], list[str]],
+    ) -> Any:
+        retrieved_context = await retrieve_context(
+            query,
+            fallback_knowledge=fallback_knowledge,
+        )
         if self._chat is None:
-            return await self._fallback.generate_shopping_list(request)
-        try:
-            user_prompt = shopping_prompts.build_user_message(
-                pantry_items=request.pantry_items,
-                recipe_goal=request.recipe_goal,
-                servings=request.servings,
+            fallback_result = await fallback(request)
+            return to_result(
+                pick_from_fallback(fallback_result),
+                merge_context(fallback_result, retrieved_context),
             )
+
+        try:
+            user_prompt = build_user_prompt(retrieved_context)
             with anyio.fail_after(GEMINI_CALL_TIMEOUT_SECONDS):
                 response = await anyio.to_thread.run_sync(
                     lambda: self._chat.invoke(
                         [
-                            ("system", shopping_prompts.SYSTEM_PROMPT),
+                            ("system", system_prompt),
                             ("human", user_prompt),
                         ]
                     )
                 )
             parsed = self._parse_json_payload(getattr(response, "content", ""))
-            shopping_list = self._normalize_shopping_list(parsed)
-            if shopping_list is None:
-                return await self._fallback.generate_shopping_list(request)
-            return shopping_list
+            normalized = normalize(parsed)
+            if normalized is None:
+                fallback_result = await fallback(request)
+                return to_result(pick_from_fallback(fallback_result), retrieved_context)
+            return to_result(normalized, retrieved_context)
         except Exception:
-            LOGGER.exception("Gemini shopping list generation failed; using fallback.")
-            return await self._fallback.generate_shopping_list(request)
+            LOGGER.exception("Gemini generation failed; using fallback.")
+            fallback_result = await fallback(request)
+            return to_result(pick_from_fallback(fallback_result), retrieved_context)
 
-    def _build_recipe_prompt(self, request: RecipeWorkflowInput) -> str:
+    @staticmethod
+    def _format_retrieved_context(chunks: Sequence[str]) -> str:
+        if not chunks:
+            return "none"
+        return "\n\n".join(chunks)
+
+    def _build_recipe_prompt(
+        self,
+        request: RecipeWorkflowInput,
+        retrieved_context: list[str],
+    ) -> str:
         encoded_items = ",".join(request.pantry_items) or "none"
         encoded_prefs = ",".join(request.dietary_preferences) or "none"
         return (
+            f"retrieved_context={self._format_retrieved_context(retrieved_context)} "
             f"pantry_items={encoded_items} "
             f"dietary_preferences={encoded_prefs} "
             "return_one_recipe=true"
+        )
+
+    def _build_shopping_prompt(
+        self,
+        request: ShoppingWorkflowInput,
+        retrieved_context: list[str],
+    ) -> str:
+        base = shopping_prompts.build_user_message(
+            pantry_items=request.pantry_items,
+            recipe_goal=request.recipe_goal,
+            servings=request.servings,
+        )
+        return (
+            f"retrieved_context={self._format_retrieved_context(retrieved_context)} "
+            f"{base}"
         )
 
     @staticmethod

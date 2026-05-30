@@ -548,6 +548,108 @@ def test_update_my_item_raises_not_found_when_no_rows_returned() -> None:
     assert exc_info.value.status_code == 404
 
 
+def test_update_my_item_re_embeds_when_embedding_fields_change() -> None:
+    class _CapturingQuery(_FakeQuery):
+        def __init__(self, client: "_CapturingSupabaseClient", table_name: str) -> None:
+            super().__init__(client, table_name)
+            self._capturing_client = client
+
+        def update(self, payload: dict[str, object]) -> "_CapturingQuery":
+            self._capturing_client.update_payloads.append((self._table_name, payload))
+            return super().update(payload)
+
+    class _CapturingSupabaseClient(_FakeSupabaseClient):
+        def __init__(self, table_results: dict[tuple[str, str], list[object]] | None = None) -> None:
+            super().__init__(table_results=table_results)
+            self.update_payloads: list[tuple[str, dict[str, object]]] = []
+
+        def table(self, table_name: str) -> _CapturingQuery:
+            return _CapturingQuery(self, table_name)
+
+    updated_row = {
+        "id": "17a336f0-eed2-4f5e-bf15-e4c4d89f9959",
+        "owner_id": "8b68f5fc-2660-4f80-a31e-58699bc2465d",
+        "household_id": "f8c2ce57-d0ac-4d8d-96f8-6c4a1844091a",
+        "name": "Oat milk",
+        "category": "dairy",
+        "quantity": 2.0,
+        "expiry_date": None,
+    }
+    client = _CapturingSupabaseClient(
+        table_results={
+            ("pantry_items", "update"): [
+                SimpleNamespace(data=[updated_row]),
+                SimpleNamespace(data=[updated_row]),
+            ],
+        }
+    )
+    service = PantryService(
+        client,
+        inline_embedding_timeout_seconds=1.0,
+        embeddings_provider=lambda: SimpleNamespace(embed_query=lambda _: [0.5, 0.6]),
+    )
+
+    result = anyio.run(
+        lambda: service.update_my_item(
+            item_id=UUID("17a336f0-eed2-4f5e-bf15-e4c4d89f9959"),
+            owner_id=UUID("8b68f5fc-2660-4f80-a31e-58699bc2465d"),
+            updates={"name": "Oat milk", "quantity": 2},
+        )
+    )
+
+    assert result.name == "Oat milk"
+    assert result.quantity == 2.0
+    embedding_updates = [
+        payload for table, payload in client.update_payloads if table == "pantry_items"
+    ]
+    assert len(embedding_updates) == 2
+    assert embedding_updates[0] == {"name": "Oat milk", "quantity": 2}
+    assert embedding_updates[1]["embedding"] == [0.5, 0.6]
+    assert embedding_updates[1]["embedding_status"] == "ready"
+    assert "embedding_metadata" in embedding_updates[1]
+
+
+def test_update_my_item_skips_re_embed_when_only_expiry_changes() -> None:
+    class _CapturingQuery(_FakeQuery):
+        def __init__(self, client: "_CapturingSupabaseClient", table_name: str) -> None:
+            super().__init__(client, table_name)
+            self._capturing_client = client
+
+        def update(self, payload: dict[str, object]) -> "_CapturingQuery":
+            self._capturing_client.update_payloads.append((self._table_name, payload))
+            return super().update(payload)
+
+    class _CapturingSupabaseClient(_FakeSupabaseClient):
+        def __init__(self, table_results: dict[tuple[str, str], list[object]] | None = None) -> None:
+            super().__init__(table_results=table_results)
+            self.update_payloads: list[tuple[str, dict[str, object]]] = []
+
+        def table(self, table_name: str) -> _CapturingQuery:
+            return _CapturingQuery(self, table_name)
+
+    updated_row = _item_row()
+    client = _CapturingSupabaseClient(
+        table_results={("pantry_items", "update"): [SimpleNamespace(data=[updated_row])]}
+    )
+    service = PantryService(
+        client,
+        embeddings_provider=lambda: SimpleNamespace(
+            embed_query=lambda _: (_ for _ in ()).throw(AssertionError("should not embed"))
+        ),
+    )
+
+    anyio.run(
+        lambda: service.update_my_item(
+            item_id=UUID("17a336f0-eed2-4f5e-bf15-e4c4d89f9959"),
+            owner_id=UUID("8b68f5fc-2660-4f80-a31e-58699bc2465d"),
+            updates={"expiry_date": "2026-12-31"},
+        )
+    )
+
+    assert len(client.update_payloads) == 1
+    assert client.update_payloads[0][1] == {"expiry_date": "2026-12-31"}
+
+
 def test_delete_my_item_raises_not_found_when_item_missing() -> None:
     client = _FakeSupabaseClient(table_results={("pantry_items", "select"): [SimpleNamespace(data=[])]})
     service = PantryService(client)
@@ -561,3 +663,32 @@ def test_delete_my_item_raises_not_found_when_item_missing() -> None:
         )
 
     assert exc_info.value.status_code == 404
+
+
+def test_delete_my_item_removes_owned_row() -> None:
+    item_id = UUID("17a336f0-eed2-4f5e-bf15-e4c4d89f9959")
+    owner_id = UUID("8b68f5fc-2660-4f80-a31e-58699bc2465d")
+    client = _FakeSupabaseClient(
+        table_results={
+            ("pantry_items", "select"): [
+                SimpleNamespace(
+                    data=[
+                        {
+                            "id": str(item_id),
+                            "household_id": "f8c2ce57-d0ac-4d8d-96f8-6c4a1844091a",
+                        }
+                    ]
+                )
+            ],
+            ("pantry_items", "delete"): [SimpleNamespace(data=[])],
+        }
+    )
+    service = PantryService(client)
+
+    result = anyio.run(
+        lambda: service.delete_my_item(item_id=item_id, owner_id=owner_id)
+    )
+
+    assert result == {"message": "Pantry item deleted"}
+    assert ("pantry_items", "select") in client.calls
+    assert ("pantry_items", "delete") in client.calls

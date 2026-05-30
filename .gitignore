@@ -76,3 +76,7 @@ services/
 .supabase/migrations/
 
 supabase/migrations
+
+.cursor/
+
+.agents/

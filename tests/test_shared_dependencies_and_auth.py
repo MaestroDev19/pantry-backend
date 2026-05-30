@@ -10,12 +10,11 @@ from starlette.requests import Request
 from pantry_server.core.config import Settings
 from pantry_server.core.exceptions import AppError
 from pantry_server.shared.auth import (
-    _get_supabase_client_dep,
     get_current_household_id,
     get_current_user,
     get_current_user_id,
 )
-from pantry_server.shared.dependencies import get_supabase_client
+from pantry_server.shared.dependencies import get_supabase_client, require_supabase_client
 
 
 def _run_get_current_user(**kwargs: Any):
@@ -158,11 +157,9 @@ def test_get_supabase_client_returns_none_when_only_anon_configured(
     assert get_supabase_client(settings) is None
 
 
-def test_get_supabase_client_dep_raises_when_unconfigured(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("pantry_server.shared.auth.get_supabase_client", lambda _: None)
-
+def test_require_supabase_client_raises_when_unconfigured() -> None:
     with pytest.raises(AppError) as exc_info:
-        _get_supabase_client_dep(Settings())
+        require_supabase_client(None)
 
     assert exc_info.value.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
 

@@ -10,5 +10,19 @@ class CategoryEnum(str, Enum):
     GRAINS = "grains"
     CANNED = "canned"
     FROZEN = "frozen"
+    SNACKS = "snacks"
+    BEVERAGES = "beverages"
     SPICES = "spices"
+    BAKING = "baking"
     OTHER = "other"
+
+
+class UnitEnum(str, Enum):
+    KILOGRAM = "kilogram"
+    GRAM = "gram"
+    LITER = "liter"
+    MILLILITER = "milliliter"
+    CUP = "cup"
+    TABLESPOON = "tablespoon"
+    TEASPOON = "teaspoon"
+    PIECE = "piece"

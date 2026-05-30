@@ -10,7 +10,7 @@ from uuid import UUID
 import anyio
 from fastapi import status
 from postgrest.exceptions import APIError
-from supabase import Client
+from pantry_server.shared.supabase_types import Client
 
 from pantry_server.contexts.households.domain.models import (
     HouseholdCreate,

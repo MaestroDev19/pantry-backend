@@ -1,3 +1,12 @@
+"""Mounts all HTTP API route groups under `/api`.
+
+Route groups and conventions:
+- Pantry / households: Bearer auth (or dev `x-user-id`), `Depends(get_*_service)` from `shared.dependencies`.
+- Recipes / shopping AI generation: same auth + `Depends(get_ai_workflow)`.
+- AI (`/ai`): IP rate limit only; no user auth (embeddings + legacy recipe path).
+- Recipe generation for clients: prefer `POST /recipes/generate-recipe` (authenticated).
+"""
+
 from fastapi import APIRouter
 
 from pantry_server.contexts.ai.presentation.router import router as ai_router

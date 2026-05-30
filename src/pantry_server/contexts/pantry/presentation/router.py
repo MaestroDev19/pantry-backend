@@ -3,7 +3,6 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Query
-from supabase import Client
 
 from pantry_server.contexts.pantry.application.pantry_service import PantryService
 from pantry_server.contexts.pantry.domain.entities import PantryItem
@@ -15,15 +14,9 @@ from pantry_server.contexts.pantry.presentation.models import (
 from pantry_server.core.config import get_settings
 from pantry_server.core.exceptions import AppError
 from pantry_server.shared.auth import get_current_household_id, get_current_user_id
-from pantry_server.shared.dependencies import get_supabase_client
+from pantry_server.shared.dependencies import get_pantry_service
 
 router = APIRouter()
-
-
-def get_pantry_service(supabase: Client | None = Depends(get_supabase_client)) -> PantryService:
-    if supabase is None:
-        raise AppError("Supabase is not configured", status_code=503)
-    return PantryService(supabase)
 
 
 def validate_embedding_worker_secret(
@@ -41,8 +34,8 @@ async def add_single_item(
     household_id: UUID = Depends(get_current_household_id),
     pantry_service: PantryService = Depends(get_pantry_service),
 ) -> dict[str, PantryItem]:
-    """JSON body: name, category (enum: produce|dairy|meat|grains|canned|frozen|spices|other),
-    quantity (>0),
+    """JSON body: name, category (enum: produce|dairy|meat|grains|canned|frozen|snacks|
+    beverages|spices|baking|other), quantity (>0), unit (defaults to piece),
     optional expiry_date (ISO date). Server adds owner_id, household_id, embedding_status."""
     item = await pantry_service.add_single_item(
         owner_id=user_id,

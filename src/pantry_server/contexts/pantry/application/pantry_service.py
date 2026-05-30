@@ -13,9 +13,9 @@ import anyio
 from fastapi import status
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from postgrest.exceptions import APIError
-from supabase import Client
+from pantry_server.shared.supabase_types import Client
 
-from pantry_server.contexts.ai.infrastructure.providers.embeddings_client import embeddings_client
+from pantry_server.contexts.ai.infrastructure.providers.gemini import require_gemini_embeddings
 from pantry_server.contexts.pantry.domain.entities import PantryItem
 from pantry_server.core.config import get_settings
 from pantry_server.core.constants import ITEMS_TABLE_NAME
@@ -39,6 +39,8 @@ JITTER_MIN_RATIO = 0.5
 JITTER_MAX_RATIO = 1.5
 
 _logger = logging.getLogger(__name__)
+
+EMBEDDING_RELEVANT_UPDATE_FIELDS = frozenset({"name", "category", "quantity"})
 
 
 def _log_postgrest_insert_failure(
@@ -85,7 +87,7 @@ class PantryService:
         self,
         supabase: Client,
         *,
-        embeddings_provider: Callable[[], GoogleGenerativeAIEmbeddings] = embeddings_client,
+        embeddings_provider: Callable[[], GoogleGenerativeAIEmbeddings] = require_gemini_embeddings,
         inline_embedding_timeout_seconds: float = INLINE_EMBEDDING_TIMEOUT_SECONDS,
     ) -> None:
         self.supabase = supabase
@@ -137,6 +139,13 @@ class PantryService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
         row = rows[0]
+        await self._refresh_item_embedding(row=row)
+
+        await self._invalidate_pantry_list_cache(owner_id=owner_id, household_id=household_id)
+        return _row_to_pantry_item(row)
+
+    async def _refresh_item_embedding(self, *, row: dict[str, Any]) -> None:
+        item_id = str(row["id"])
         embedding_text = self._build_embedding_text(row)
 
         try:
@@ -161,15 +170,12 @@ class PantryService:
                             "embedding_error": None,
                         }
                     )
-                    .eq("id", str(row["id"]))
+                    .eq("id", item_id)
                     .execute()
                 )
             )
         except Exception:
-            await self._enqueue_embedding_job(item_id=str(row["id"]))
-
-        await self._invalidate_pantry_list_cache(owner_id=owner_id, household_id=household_id)
-        return _row_to_pantry_item(row)
+            await self._enqueue_embedding_job(item_id=item_id)
 
     @staticmethod
     def _build_embedding_text(row: dict[str, Any]) -> str:
@@ -633,7 +639,10 @@ class PantryService:
                 "Pantry item not found",
                 status_code=status.HTTP_404_NOT_FOUND,
             )
-        item = _row_to_pantry_item(rows[0])
+        row = rows[0]
+        if EMBEDDING_RELEVANT_UPDATE_FIELDS.intersection(updates):
+            await self._refresh_item_embedding(row=row)
+        item = _row_to_pantry_item(row)
         await self._invalidate_pantry_list_cache(
             owner_id=owner_id,
             household_id=UUID(item.household_id),

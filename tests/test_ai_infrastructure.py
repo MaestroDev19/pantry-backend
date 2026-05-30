@@ -27,9 +27,10 @@ def test_mock_ai_workflow_generate_recipe_uses_request_items_or_defaults() -> No
         RecipeWorkflowInput(pantry_items=["beans"], dietary_preferences=[]),
     )
 
-    assert from_request.ingredients == ["beans"]
-    assert from_request.title == "Mock Pantry Bowl"
-    assert len(from_request.instructions) == 3
+    assert from_request.recipe.ingredients == ["beans"]
+    assert from_request.recipe.title == "Mock Pantry Bowl"
+    assert len(from_request.recipe.instructions) == 3
+    assert from_request.retrieved_context == []
 
 
 def test_recipe_workflow_input_rejects_empty_pantry_items() -> None:
@@ -45,7 +46,8 @@ def test_mock_ai_workflow_generate_shopping_list_returns_sorted_missing_items() 
         ShoppingWorkflowInput(pantry_items=["Salt", "garlic"], recipe_goal="simple", servings=2),
     )
 
-    assert result.items == ["olive oil", "pasta", "tomato"]
+    assert result.shopping_list.items == ["olive oil", "pasta", "tomato"]
+    assert result.retrieved_context == []
 
 
 def test_get_gemini_chat_returns_none_when_api_key_missing() -> None:
@@ -163,3 +165,42 @@ def test_get_vector_store_constructs_supabase_vector_store(monkeypatch: pytest.M
         "table_name": "pantry_items",
         "query_name": "match_pantry_items",
     }
+
+
+def test_build_retrieve_context_tool_similarity_search() -> None:
+    from pantry_server.contexts.ai.infrastructure.context_retrieval import (
+        build_retrieve_context_tool,
+    )
+
+    doc = SimpleNamespace(metadata={"id": "item-1"}, page_content="tomato pasta")
+    vector_store = SimpleNamespace(
+        similarity_search=lambda query, k=2: [doc] if query else [],
+    )
+
+    tool = build_retrieve_context_tool(vector_store, k=2)
+    content = tool.invoke({"query": "tomato"})
+
+    assert "tomato pasta" in content
+    assert "item-1" in content
+
+
+def test_retrieve_context_uses_keyword_fallback_when_vector_store_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pantry_server.contexts.ai.infrastructure import context_retrieval
+
+    async def _raise_app_error():
+        raise AppError("Supabase is not configured for vector store", status_code=500)
+
+    monkeypatch.setattr(context_retrieval, "get_vector_store", _raise_app_error)
+
+    chunks = anyio.run(
+        lambda: context_retrieval.retrieve_context(
+            "tomato pasta",
+            k=2,
+            fallback_knowledge=context_retrieval.RECIPE_KNOWLEDGE_BASE,
+        )
+    )
+
+    assert len(chunks) == 2
+    assert any("Tomato" in chunk for chunk in chunks)

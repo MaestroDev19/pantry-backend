@@ -7,13 +7,12 @@ from uuid import UUID
 import anyio
 from fastapi import Depends, Header, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from supabase import Client
-
 from pantry_server.core.config import Settings, get_settings
 from pantry_server.core.exceptions import AppError
 from pantry_server.observability.logging_events import log_auth_failure
 from pantry_server.observability.metrics import record_auth_failure
-from pantry_server.shared.dependencies import get_supabase_client
+from pantry_server.shared.dependencies import get_supabase_client, require_supabase_client
+from pantry_server.shared.supabase_types import Client
 
 auth_scheme = HTTPBearer(auto_error=False)
 logger = logging.getLogger("pantry_server.auth")
@@ -24,15 +23,10 @@ def _auth_fail(*, reason: str) -> None:
     log_auth_failure(logger, reason=reason)
 
 
-def _get_supabase_client_dep(settings: Settings = Depends(get_settings)) -> Client:
-    client = get_supabase_client(settings)
-    if client is None:
-        _auth_fail(reason="supabase_not_configured")
-        raise AppError(
-            "Supabase is not configured",
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        )
-    return client
+def _get_supabase_client_dep(
+    supabase: Client = Depends(require_supabase_client),
+) -> Client:
+    return supabase
 
 
 def _get_supabase_client_optional(settings: Settings = Depends(get_settings)) -> Client | None:

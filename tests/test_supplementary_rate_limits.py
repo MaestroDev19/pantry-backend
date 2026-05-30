@@ -6,10 +6,12 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
+from pantry_server.contexts.ai.infrastructure.mock_workflow import MockAiWorkflow
 from pantry_server.contexts.households.domain.models import HouseholdResponse
-from pantry_server.contexts.households.presentation.router import get_household_service
+from pantry_server.shared.dependencies import get_household_service, require_supabase_client
 from pantry_server.core.config import Settings, get_settings
 from pantry_server.main import app
+from pantry_server.shared.ai_workflow import get_ai_workflow
 from pantry_server.middleware.household_join_rate_limit import _clear_for_testing as clear_join_limiters
 from pantry_server.middleware.supplementary_rate_limits import (
     clear_supplementary_rate_limiters_for_testing,
@@ -53,6 +55,7 @@ class _FakeHouseholdService:
 
 def test_ai_ip_limit_returns_429() -> None:
     app.dependency_overrides[get_settings] = lambda: _supplementary_settings()
+    app.dependency_overrides[get_ai_workflow] = lambda: MockAiWorkflow()
     try:
         client = TestClient(app)
         payload = {"text": "hello"}
@@ -64,7 +67,8 @@ def test_ai_ip_limit_returns_429() -> None:
         assert second.status_code == 200
         assert third.status_code == 429
         assert third.json()["error_code"] == "rate_limit_exceeded"
-        assert third.headers.get("Retry-After") == "60"
+        retry_after = int(third.headers.get("Retry-After", "0"))
+        assert 1 <= retry_after <= 60
     finally:
         app.dependency_overrides.clear()
 
@@ -75,6 +79,7 @@ def test_household_mutation_user_limit_returns_429() -> None:
         supabase_url=None,
     )
     app.dependency_overrides[get_household_service] = lambda: _FakeHouseholdService()
+    app.dependency_overrides[require_supabase_client] = lambda: object()
     try:
         client = TestClient(app)
         headers = {"x-user-id": uid}

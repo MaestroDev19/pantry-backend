@@ -4,7 +4,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends
-from supabase import Client
+from pantry_server.shared.supabase_types import Client
 
 from pantry_server.contexts.households.application.household_service import HouseholdService
 from pantry_server.contexts.households.domain.models import (
@@ -19,7 +19,6 @@ from pantry_server.contexts.households.presentation.models import (
     HouseholdJoinRequest,
     HouseholdRenameRequest,
 )
-from pantry_server.core.exceptions import AppError
 from pantry_server.middleware.household_join_rate_limit import (
     enforce_join_ip_limit,
     enforce_join_user_limit,
@@ -28,15 +27,9 @@ from pantry_server.middleware.supplementary_rate_limits import (
     enforce_household_mutation_user_limit,
 )
 from pantry_server.shared.auth import get_current_user_id
-from pantry_server.shared.dependencies import get_supabase_client
+from pantry_server.shared.dependencies import get_household_service, require_supabase_client
 
 router = APIRouter()
-
-
-def get_household_service(supabase: Client | None = Depends(get_supabase_client)) -> HouseholdService:
-    if supabase is None:
-        raise AppError("Supabase is not configured", status_code=503)
-    return HouseholdService(supabase)
 
 
 @router.post("/create", response_model=HouseholdResponse)
@@ -46,7 +39,7 @@ async def create_household(
     body: HouseholdCreateRequest,
     user_id: UUID = Depends(get_current_user_id),
     household_service: HouseholdService = Depends(get_household_service),
-    supabase_admin: Client | None = Depends(get_supabase_client),
+    supabase_admin: Client = Depends(require_supabase_client),
 ) -> HouseholdResponse:
     household = HouseholdCreate(name=body.name, is_personal=body.is_personal)
     return await household_service.create_household(
@@ -88,10 +81,8 @@ async def convert_to_joinable(
     body: HouseholdConvertToJoinableRequest | None = Body(None),
     user_id: UUID = Depends(get_current_user_id),
     household_service: HouseholdService = Depends(get_household_service),
-    supabase_admin: Client | None = Depends(get_supabase_client),
+    supabase_admin: Client = Depends(require_supabase_client),
 ) -> HouseholdResponse:
-    if supabase_admin is None:
-        raise AppError("Supabase is not configured", status_code=503)
     name = body.name if body else None
     return await household_service.convert_personal_to_joinable(
         user_id,
@@ -107,10 +98,8 @@ async def rename_household(
     body: HouseholdRenameRequest,
     user_id: UUID = Depends(get_current_user_id),
     household_service: HouseholdService = Depends(get_household_service),
-    supabase_admin: Client | None = Depends(get_supabase_client),
+    supabase_admin: Client = Depends(require_supabase_client),
 ) -> HouseholdResponse:
-    if supabase_admin is None:
-        raise AppError("Supabase is not configured", status_code=503)
     return await household_service.rename_household(
         user_id,
         supabase_admin,

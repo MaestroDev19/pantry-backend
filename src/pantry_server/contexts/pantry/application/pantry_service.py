@@ -101,8 +101,10 @@ class PantryService:
         household_id: UUID,
         item_data: dict[str, object],
     ) -> PantryItem:
+        clean_item_data = dict(item_data)
+        clean_item_data.pop("unit", None)
         payload = {
-            **item_data,
+            **clean_item_data,
             "owner_id": str(owner_id),
             "household_id": str(household_id),
             "embedding_status": "pending",
@@ -233,15 +235,18 @@ class PantryService:
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
 
-        payload = [
-            {
-                **item_data,
-                "owner_id": str(owner_id),
-                "household_id": str(household_id),
-                "embedding_status": "pending",
-            }
-            for item_data in items_data
-        ]
+        payload = []
+        for item_data in items_data:
+            clean_item = dict(item_data)
+            clean_item.pop("unit", None)
+            payload.append(
+                {
+                    **clean_item,
+                    "owner_id": str(owner_id),
+                    "household_id": str(household_id),
+                    "embedding_status": "pending",
+                }
+            )
         try:
             response = await anyio.to_thread.run_sync(
                 lambda: self.supabase.table(ITEMS_TABLE_NAME).insert(payload).execute(),
@@ -612,7 +617,9 @@ class PantryService:
         owner_id: UUID,
         updates: dict[str, object],
     ) -> PantryItem:
-        if not updates:
+        clean_updates = dict(updates)
+        clean_updates.pop("unit", None)
+        if not clean_updates:
             raise AppError(
                 "No fields provided for update",
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -621,7 +628,7 @@ class PantryService:
             response = await anyio.to_thread.run_sync(
                 lambda: (
                     self.supabase.table(ITEMS_TABLE_NAME)
-                    .update(updates)
+                    .update(clean_updates)
                     .eq("id", str(item_id))
                     .eq("owner_id", str(owner_id))
                     .execute()

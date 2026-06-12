@@ -25,6 +25,11 @@ class FixedWindowRateLimiter:
             return True
         async with self._lock:
             now = time.monotonic()
+            # Simple cleanup of expired windows during checking
+            expired_keys = [k for k, (start, _) in self._data.items() if now - start >= self._window]
+            for k in expired_keys:
+                self._data.pop(k, None)
+
             start, count = self._data.get(key, (now, 0))
             if now - start >= self._window:
                 self._data[key] = (now, 1)

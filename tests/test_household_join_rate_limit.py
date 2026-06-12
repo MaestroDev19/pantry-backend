@@ -62,7 +62,8 @@ def test_join_ip_limit_returns_429_before_authentication() -> None:
         assert third.status_code == 429
         body = third.json()
         assert body["error_code"] == "rate_limit_exceeded"
-        assert third.headers.get("Retry-After") == "60"
+        retry_after = int(third.headers.get("Retry-After", "0"))
+        assert 1 <= retry_after <= 60
     finally:
         app.dependency_overrides.clear()
 

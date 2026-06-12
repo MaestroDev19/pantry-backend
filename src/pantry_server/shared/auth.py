@@ -39,7 +39,7 @@ async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(auth_scheme),
     supabase: Client | None = Depends(_get_supabase_client_optional),
 ):
-    if settings.auth_allow_x_user_id_header and x_user_id is not None and x_user_id.strip() != "":
+    if settings.app_env != "production" and settings.auth_allow_x_user_id_header and x_user_id is not None and x_user_id.strip() != "":
         try:
             uid = UUID(x_user_id.strip())
         except ValueError as exc:

@@ -102,6 +102,32 @@ def test_get_current_user_ignores_dev_header_when_flag_false() -> None:
     assert getattr(user, "id", None) == "8b68f5fc-2660-4f80-a31e-58699bc2465d"
 
 
+def test_get_current_user_ignores_dev_header_in_production() -> None:
+    fake_supabase = _FakeSupabaseClient(user_obj=SimpleNamespace(id="8b68f5fc-2660-4f80-a31e-58699bc2465d"))
+    credentials = SimpleNamespace(credentials="token")
+
+    user = _run_get_current_user(
+        settings=Settings(auth_allow_x_user_id_header=True, app_env="production"),
+        x_user_id="8b68f5fc-2660-4f80-a31e-58699bc2465d",
+        credentials=credentials,
+        supabase=fake_supabase,
+    )
+
+    assert getattr(user, "id", None) == "8b68f5fc-2660-4f80-a31e-58699bc2465d"
+
+
+def test_get_current_user_ignores_dev_header_in_production_unconfigured_raises() -> None:
+    with pytest.raises(AppError) as exc_info:
+        _run_get_current_user(
+            settings=Settings(auth_allow_x_user_id_header=True, app_env="production"),
+            x_user_id="8b68f5fc-2660-4f80-a31e-58699bc2465d",
+            credentials=None,
+            supabase=None,
+        )
+
+    assert exc_info.value.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+
+
 def test_get_supabase_client_returns_none_when_url_missing() -> None:
     settings = Settings(supabase_url=None)
     assert get_supabase_client(settings) is None

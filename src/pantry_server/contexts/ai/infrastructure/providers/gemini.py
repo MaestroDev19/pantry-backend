@@ -28,7 +28,7 @@ def get_gemini_embeddings(settings: Settings) -> GoogleGenerativeAIEmbeddings | 
         api_key=settings.google_genai_api_key,
         model=settings.gemini_embeddings_model,
         task_type="retrieval_document",
-        dimensions=settings.gemini_embeddings_output_dimensionality,
+        output_dimensionality=settings.gemini_embeddings_output_dimensionality,
     )
 
 

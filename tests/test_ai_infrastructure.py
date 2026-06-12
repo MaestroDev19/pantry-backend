@@ -105,7 +105,7 @@ def test_get_gemini_embeddings_constructs_client_with_settings(
         "api_key": "key",
         "model": "embedding-test",
         "task_type": "retrieval_document",
-        "dimensions": 256,
+        "output_dimensionality": 256,
     }
 
 
@@ -153,7 +153,7 @@ def test_get_vector_store_constructs_supabase_vector_store(monkeypatch: pytest.M
         lambda _: embeddings,
     )
     monkeypatch.setattr(
-        "pantry_server.contexts.ai.infrastructure.vector_store.SupabaseVectorStore",
+        "pantry_server.contexts.ai.infrastructure.vector_store.CompatibleSupabaseVectorStore",
         lambda **kwargs: kwargs,
     )
 

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends
 
 from pantry_server.contexts.ai.application.ports import AiWorkflowPort
 from pantry_server.shared.ai_workflow import get_ai_workflow
-from pantry_server.shared.auth import get_current_user_id
+from pantry_server.shared.auth import get_current_household_id, get_current_user_id
 from pantry_server.shared.contracts import ShoppingGenerationResult, ShoppingWorkflowInput
 
 router = APIRouter()
@@ -20,6 +20,7 @@ async def list_shopping_lists() -> dict[str, list[object]]:
 async def generate_shopping_list(
     payload: ShoppingWorkflowInput,
     _user_id: UUID = Depends(get_current_user_id),
+    household_id: UUID = Depends(get_current_household_id),
     workflow: AiWorkflowPort = Depends(get_ai_workflow),
 ) -> ShoppingGenerationResult:
-    return await workflow.generate_shopping_list(payload)
+    return await workflow.generate_shopping_list(payload, household_id=household_id)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+from uuid import UUID
 
 import anyio
 from langchain.tools import tool
@@ -29,6 +30,16 @@ SHOPPING_KNOWLEDGE_BASE = [
 ]
 
 
+def _keyword_fallback(query: str, knowledge_base: list[str], *, k: int) -> list[str]:
+    tokens = {token.strip().lower() for token in query.split() if token.strip()}
+    ranked = sorted(
+        knowledge_base,
+        key=lambda chunk: sum(token in chunk.lower() for token in tokens),
+        reverse=True,
+    )
+    return ranked[:k]
+
+
 def _serialize_documents(retrieved_docs: list[Any]) -> tuple[str, list[str]]:
     chunks = [
         f"Source: {doc.metadata}\nContent: {doc.page_content}"
@@ -43,8 +54,12 @@ def _search_and_serialize(
     query: str,
     *,
     k: int,
+    household_id: UUID | None = None,
 ) -> tuple[str, list[str]]:
-    retrieved_docs = vector_store.similarity_search(query, k=k)
+    filter_dict: dict[str, str] = {}
+    if household_id is not None:
+        filter_dict["household_id"] = str(household_id)
+    retrieved_docs = vector_store.similarity_search(query, k=k, filter=filter_dict)
     return _serialize_documents(retrieved_docs)
 
 
@@ -57,19 +72,10 @@ def build_retrieve_context_tool(vector_store: SupabaseVectorStore, *, k: int = D
     return retrieve_context_for_query
 
 
-def _keyword_fallback(query: str, knowledge_base: list[str], *, k: int) -> list[str]:
-    tokens = {token.strip().lower() for token in query.split() if token.strip()}
-    ranked = sorted(
-        knowledge_base,
-        key=lambda chunk: sum(token in chunk.lower() for token in tokens),
-        reverse=True,
-    )
-    return ranked[:k]
-
-
 async def retrieve_context(
     query: str,
     *,
+    household_id: UUID | None = None,
     k: int = DEFAULT_RETRIEVAL_K,
     fallback_knowledge: list[str] | None = None,
 ) -> list[str]:
@@ -86,7 +92,9 @@ async def retrieve_context(
         return []
 
     def _run_search() -> list[str]:
-        _serialized, chunks = _search_and_serialize(vector_store, normalized_query, k=k)
+        _serialized, chunks = _search_and_serialize(
+            vector_store, normalized_query, k=k, household_id=household_id,
+        )
         return chunks
 
     try:

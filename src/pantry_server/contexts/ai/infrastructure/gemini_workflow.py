@@ -4,6 +4,7 @@ import json
 import logging
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any, TypeVar
+from uuid import UUID
 
 import anyio
 
@@ -62,10 +63,15 @@ class GeminiAiWorkflow(AiWorkflowPort):
             LOGGER.exception("Gemini embeddings failed; using fallback.")
             return await self._fallback.create_embedding(request)
 
-    async def generate_recipe(self, request: RecipeWorkflowInput) -> RecipeGenerationResult:
+    async def generate_recipe(
+        self,
+        request: RecipeWorkflowInput,
+        household_id: UUID | None = None,
+    ) -> RecipeGenerationResult:
         return await self._generate_with_gemini(
             request=request,
             query=build_recipe_query(request),
+            household_id=household_id,
             fallback_knowledge=RECIPE_KNOWLEDGE_BASE,
             system_prompt=recipe_prompts.SYSTEM_PROMPT,
             build_user_prompt=lambda ctx: self._build_recipe_prompt(request, ctx),
@@ -82,10 +88,12 @@ class GeminiAiWorkflow(AiWorkflowPort):
     async def generate_shopping_list(
         self,
         request: ShoppingWorkflowInput,
+        household_id: UUID | None = None,
     ) -> ShoppingGenerationResult:
         return await self._generate_with_gemini(
             request=request,
             query=build_shopping_query(request),
+            household_id=household_id,
             fallback_knowledge=SHOPPING_KNOWLEDGE_BASE,
             system_prompt=shopping_prompts.SYSTEM_PROMPT,
             build_user_prompt=lambda ctx: self._build_shopping_prompt(request, ctx),
@@ -104,6 +112,7 @@ class GeminiAiWorkflow(AiWorkflowPort):
         *,
         request: TRequest,
         query: str,
+        household_id: UUID | None = None,
         fallback_knowledge: list[str],
         system_prompt: str,
         build_user_prompt: Callable[[list[str]], str],
@@ -115,6 +124,7 @@ class GeminiAiWorkflow(AiWorkflowPort):
     ) -> Any:
         retrieved_context = await retrieve_context(
             query,
+            household_id=household_id,
             fallback_knowledge=fallback_knowledge,
         )
         if self._chat is None:

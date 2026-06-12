@@ -8,7 +8,7 @@ from pantry_server.core.exceptions import AppError
 from pantry_server.middleware.fixed_window_limiter import FixedWindowRateLimiter
 from pantry_server.middleware.rate_limit import WINDOW_SECONDS
 from pantry_server.shared.ai_workflow import get_ai_workflow
-from pantry_server.shared.auth import get_current_user_id
+from pantry_server.shared.auth import get_current_household_id, get_current_user_id
 from pantry_server.shared.contracts import RecipeGenerationResult, RecipeWorkflowInput
 from pantry_server.shared.pantry_read_cache import get_or_set_coroutine
 
@@ -31,9 +31,10 @@ async def list_recipes() -> dict[str, list[object]]:
 async def generate_recipe(
     payload: RecipeWorkflowInput,
     _user_id: UUID = Depends(get_current_user_id),
+    household_id: UUID = Depends(get_current_household_id),
     workflow: AiWorkflowPort = Depends(get_ai_workflow),
 ) -> RecipeGenerationResult:
-    return await workflow.generate_recipe(payload)
+    return await workflow.generate_recipe(payload, household_id=household_id)
 
 
 @router.get("/get-random-recipe")

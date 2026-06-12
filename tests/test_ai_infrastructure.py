@@ -174,7 +174,7 @@ def test_build_retrieve_context_tool_similarity_search() -> None:
 
     doc = SimpleNamespace(metadata={"id": "item-1"}, page_content="tomato pasta")
     vector_store = SimpleNamespace(
-        similarity_search=lambda query, k=2: [doc] if query else [],
+        similarity_search=lambda query, k=2, filter=None: [doc] if query else [],
     )
 
     tool = build_retrieve_context_tool(vector_store, k=2)

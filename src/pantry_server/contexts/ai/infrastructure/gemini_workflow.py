@@ -11,6 +11,12 @@ import anyio
 from pantry_server.contexts.ai.application.ports import AiWorkflowPort
 from pantry_server.contexts.ai.application.prompts import recipes as recipe_prompts
 from pantry_server.contexts.ai.application.prompts import shopping_lists as shopping_prompts
+from pantry_server.contexts.ai.infrastructure.workflow_methods import (
+    _build_recipe_prompt,
+    _build_shopping_prompt,
+    _normalize_recipe,
+    _normalize_shopping_list,
+)
 from pantry_server.contexts.ai.infrastructure.context_retrieval import (
     RECIPE_KNOWLEDGE_BASE,
     SHOPPING_KNOWLEDGE_BASE,
@@ -74,8 +80,8 @@ class GeminiAiWorkflow(AiWorkflowPort):
             household_id=household_id,
             fallback_knowledge=RECIPE_KNOWLEDGE_BASE,
             system_prompt=recipe_prompts.SYSTEM_PROMPT,
-            build_user_prompt=lambda ctx: self._build_recipe_prompt(request, ctx),
-            normalize=self._normalize_recipe,
+            build_user_prompt=lambda ctx: _build_recipe_prompt(request, ctx),
+            normalize=_normalize_recipe,
             fallback=self._fallback.generate_recipe,
             to_result=lambda recipe, ctx: RecipeGenerationResult(
                 recipe=recipe,
@@ -96,8 +102,8 @@ class GeminiAiWorkflow(AiWorkflowPort):
             household_id=household_id,
             fallback_knowledge=SHOPPING_KNOWLEDGE_BASE,
             system_prompt=shopping_prompts.SYSTEM_PROMPT,
-            build_user_prompt=lambda ctx: self._build_shopping_prompt(request, ctx),
-            normalize=self._normalize_shopping_list,
+            build_user_prompt=lambda ctx: _build_shopping_prompt(request, ctx),
+            normalize=_normalize_shopping_list,
             fallback=self._fallback.generate_shopping_list,
             to_result=lambda shopping_list, ctx: ShoppingGenerationResult(
                 shopping_list=shopping_list,
@@ -157,41 +163,6 @@ class GeminiAiWorkflow(AiWorkflowPort):
             return to_result(pick_from_fallback(fallback_result), retrieved_context)
 
     @staticmethod
-    def _format_retrieved_context(chunks: Sequence[str]) -> str:
-        if not chunks:
-            return "none"
-        return "\n\n".join(chunks)
-
-    def _build_recipe_prompt(
-        self,
-        request: RecipeWorkflowInput,
-        retrieved_context: list[str],
-    ) -> str:
-        encoded_items = ",".join(request.pantry_items) or "none"
-        encoded_prefs = ",".join(request.dietary_preferences) or "none"
-        return (
-            f"retrieved_context={self._format_retrieved_context(retrieved_context)} "
-            f"pantry_items={encoded_items} "
-            f"dietary_preferences={encoded_prefs} "
-            "return_one_recipe=true"
-        )
-
-    def _build_shopping_prompt(
-        self,
-        request: ShoppingWorkflowInput,
-        retrieved_context: list[str],
-    ) -> str:
-        base = shopping_prompts.build_user_message(
-            pantry_items=request.pantry_items,
-            recipe_goal=request.recipe_goal,
-            servings=request.servings,
-        )
-        return (
-            f"retrieved_context={self._format_retrieved_context(retrieved_context)} "
-            f"{base}"
-        )
-
-    @staticmethod
     def _parse_json_payload(content: Any) -> Any:
         if isinstance(content, list):
             content = " ".join(
@@ -210,41 +181,3 @@ class GeminiAiWorkflow(AiWorkflowPort):
             return json.loads(stripped)
         except json.JSONDecodeError:
             return None
-
-    @staticmethod
-    def _normalize_recipe(payload: Any) -> RecipeWorkflowOutput | None:
-        if isinstance(payload, list) and payload:
-            payload = payload[0]
-        if not isinstance(payload, dict):
-            return None
-        title = str(payload.get("title", "")).strip()
-        ingredients = payload.get("ingredients") or payload.get("ing") or []
-        instructions = payload.get("instructions") or payload.get("steps") or []
-        normalized_ingredients = [str(item) for item in ingredients if str(item).strip()]
-        normalized_instructions = [str(step) for step in instructions if str(step).strip()]
-        if not title or not normalized_ingredients or not normalized_instructions:
-            return None
-        return RecipeWorkflowOutput(
-            title=title,
-            ingredients=normalized_ingredients,
-            instructions=normalized_instructions,
-        )
-
-    @staticmethod
-    def _normalize_shopping_list(payload: Any) -> ShoppingWorkflowOutput | None:
-        if not isinstance(payload, dict):
-            return None
-        raw_items = payload.get("items", [])
-        if not isinstance(raw_items, list):
-            return None
-        normalized_items: list[str] = []
-        for item in raw_items:
-            if isinstance(item, dict):
-                value = item.get("name")
-                if value:
-                    normalized_items.append(str(value))
-            elif str(item).strip():
-                normalized_items.append(str(item))
-        if not normalized_items:
-            return None
-        return ShoppingWorkflowOutput(items=normalized_items)

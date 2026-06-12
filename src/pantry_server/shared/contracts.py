@@ -37,6 +37,9 @@ class RecipeWorkflowOutput(BaseModel):
     title: str
     ingredients: list[str]
     instructions: list[str]
+    pantry_ingredients: list[str] = Field(default_factory=list)
+    additional_ingredients: list[str] = Field(default_factory=list)
+    pantry_coverage_note: str | None = None
 
 
 class RecipeGenerationResult(BaseModel):

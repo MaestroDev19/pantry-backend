@@ -3,43 +3,33 @@ from __future__ import annotations
 from typing import Iterable
 
 
-SYSTEM_PROMPT = """You are a pantry-based recipe engine.
+SYSTEM_PROMPT = """You are a pantry-first recipe engine.
 
-Generate ONE recipe only.
+Output ONE recipe as raw JSON only (no markdown, no backticks):
+{"title":string,"pantry_ing":string[],"extra_ing":string[],"ingredients":string[],"instructions":string[],"gap":string|null}
 
-Output ONLY raw JSON (no markdown, no backticks) with this exact schema:
-{"title": string, "ingredients": string[], "instructions": string[]}
-
-Rules (follow all):
-- When retrieved_context is provided, prefer facts from it for pairings and technique.
-- Obey dietary_preferences.
-- Use ingredients from pantry_items when possible; do not invent specialty ingredients not in pantry_items.
-- Keep text compact: each ingredient/instruction string should be short.
-"""
+Rules:
+- pantry_ing: items sourced from ctx/items only — the dish must centre on these.
+- extra_ing: minimal buy-list to complete the dish; omit if pantry covers it.
+- ingredients: all items combined in use order.
+- gap: one short sentence if items can't satisfy the request, else null.
+- Prefer ctx for technique and pairings when present.
+- Obey prefs. Keep all strings short."""
 
 
-_STATUS = {
-    "good": "~",
-    "expiring": "!",
-    "expired": "!!",
-}
+def _strip_chunk(chunk: str) -> str:
+    """Drop the 'Source: {...}\\nContent:' envelope; keep only the content text."""
+    if "Content:" in chunk:
+        return chunk.split("Content:", 1)[-1].strip()
+    return chunk.strip()
 
 
 def build_user_message(
-    items: Iterable[object],
-    prefs: Iterable[object],
-    max_time: int,
-    diff: object,
-    mode: object,
+    pantry_items: Iterable[str],
+    dietary_preferences: Iterable[str],
+    retrieved_context: Iterable[str],
 ) -> str:
-    encoded_items = ";".join(
-        f"{getattr(i, 'name')}|{getattr(i, 'quantity')}|{_STATUS.get(getattr(i, 'status', 'good'), '~')}"
-        for i in items
-    )
-    encoded_prefs = ",".join(getattr(t, "value", str(t)) for t in prefs) or "none"
-    return (
-        f"items={encoded_items} "
-        f"prefs={encoded_prefs} "
-        f"t={max_time} d={getattr(diff, 'value', str(diff))} m={getattr(mode, 'value', str(mode))}"
-    )
-
+    ctx   = "|".join(_strip_chunk(c) for c in retrieved_context) or "none"
+    items = ";".join(str(i).strip() for i in pantry_items)       or "none"
+    prefs = ",".join(str(p).strip() for p in dietary_preferences) or "none"
+    return f"ctx={ctx} items={items} prefs={prefs}"

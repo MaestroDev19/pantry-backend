@@ -38,14 +38,26 @@ def meal_to_recipe_components(meal: dict[str, Any]) -> dict[str, object]:
     ]
     ingredients = [ing for ing in ingredients if ing]
 
+    import re
     raw_instructions = str(meal.get("strInstructions") or "").strip()
-    steps = [
+    raw_steps = [
         chunk.strip()
         for chunk in raw_instructions.replace("\r\n", "\n").split("\n")
         if chunk.strip()
     ]
-    if len(steps) <= 1:
-        steps = [s.strip() for s in raw_instructions.split(".") if s.strip()]
+    if len(raw_steps) <= 1:
+        raw_steps = [s.strip() for s in raw_instructions.split(".") if s.strip()]
+
+    steps = []
+    for step in raw_steps:
+        s = step.strip()
+        # Strip leading checkboxes, bullets, and symbols
+        s = re.sub(r'^[▢☐☑☒•\-\*\+\s\u2022]+', '', s).strip()
+        s = re.sub(r'^\[[\sXx]?\]\s*', '', s).strip()
+        s = re.sub(r'(?i)^step\s*\d+\s*(?:\.|\:|\-)?\s*', '', s).strip()
+        # Keep only if it contains alphanumeric characters
+        if s and any(c.isalnum() for c in s):
+            steps.append(s)
 
     tags = [t.strip().lower() for t in (meal.get("strTags") or "").split(",") if t.strip()]
 

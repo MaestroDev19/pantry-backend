@@ -3,22 +3,29 @@ from __future__ import annotations
 from typing import Iterable
 
 
-SYSTEM_PROMPT = """Role: Pantry shopping list engine.
+SYSTEM_PROMPT = """You are a shopping list engine.
+
+Output raw JSON only (no markdown, no backticks):
+{"items":string[]}
 
 Rules:
-1. Build one shopping list from recipe_goal and pantry inventory.
-2. When retrieved_context is provided, use it to justify missing staples.
-3. Prioritize essentials first, then optional upgrades.
-4. Never output markdown. Output ONLY raw JSON object.
+- items: only ingredients missing from the user's pantry that are needed for the goal.
+- Use ctx for brand or quantity hints when present.
+- Keep each item string short (name + quantity where relevant)."""
 
-Schema:
-{"goal":"str","items":[{"name":"str","quantity":"str","priority":"high|medium|low","reason":"str"}]}"""
+
+def _strip_chunk(chunk: str) -> str:
+    if "Content:" in chunk:
+        return chunk.split("Content:", 1)[-1].strip()
+    return chunk.strip()
 
 
 def build_user_message(
     pantry_items: Iterable[str],
     recipe_goal: str,
     servings: int,
+    retrieved_context: Iterable[str] = (),
 ) -> str:
-    encoded_items = ",".join(pantry_items) or "none"
-    return f"pantry_items={encoded_items} recipe_goal={recipe_goal} servings={servings}"
+    ctx   = "|".join(_strip_chunk(c) for c in retrieved_context) or "none"
+    items = ";".join(str(i).strip() for i in pantry_items)       or "none"
+    return f"ctx={ctx} goal={recipe_goal.strip()} items={items} srv={servings}"

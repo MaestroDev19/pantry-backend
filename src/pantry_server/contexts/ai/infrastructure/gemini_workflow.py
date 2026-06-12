@@ -36,7 +36,7 @@ from pantry_server.shared.contracts import (
 )
 
 LOGGER = logging.getLogger("pantry_server.ai.gemini")
-GEMINI_CALL_TIMEOUT_SECONDS = 4.0
+GEMINI_CALL_TIMEOUT_SECONDS = 30.0
 
 TRequest = TypeVar("TRequest")
 TOutput = TypeVar("TOutput")
